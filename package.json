@@ -12,6 +12,7 @@
     "node": ">=20.12"
   },
   "scripts": {
+    "setup": "node scripts/setup.mjs",
     "dev": "concurrently -n server,client -c blue,green \"npm run dev -w server\" \"npm run dev -w client\"",
     "build": "npm run build -w shared && npm run build -w client && npm run build -w server",
     "start": "node server/dist/index.js",

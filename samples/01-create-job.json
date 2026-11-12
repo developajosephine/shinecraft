@@ -1,0 +1,22 @@
+{
+  "opId": "aaaaaaaa-0000-4000-8000-000000000001",
+  "seq": 1,
+  "deviceId": "sample-device-A",
+  "recordType": "job",
+  "recordId": "bbbbbbbb-0000-4000-8000-000000000001",
+  "type": "create",
+  "payload": {
+    "plate": "KDS 901X",
+    "vehicleType": "saloon",
+    "service": "full",
+    "priceKes": 600,
+    "paymentMethod": null,
+    "mpesaCode": null,
+    "attendant": "Attendant Amani (demo)",
+    "status": "waiting",
+    "waterLitres": 60,
+    "createdAt": "2026-01-10T08:00:00.000Z"
+  },
+  "baseVersion": null,
+  "clientTimestamp": "2026-01-10T08:00:00.000Z"
+}

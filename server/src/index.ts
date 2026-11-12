@@ -1,9 +1,12 @@
 import { createApp } from './app';
 import { loadConfig } from './config';
-import { createPool, migrate } from './db';
+import { createPool, explainDbError, migrate } from './db';
+
+let databaseUrl = '';
 
 async function main() {
   const config = loadConfig();
+  databaseUrl = config.databaseUrl;
   const pool = createPool(config.databaseUrl);
   pool.on('error', (err) => console.error(JSON.stringify({ event: 'pg_pool_error', message: err.message })));
 
@@ -27,6 +30,8 @@ async function main() {
 }
 
 main().catch((err) => {
-  console.error(JSON.stringify({ event: 'fatal', message: err instanceof Error ? err.message : String(err) }));
+  const help = explainDbError(err, databaseUrl);
+  if (help) console.error(`\n${help}\n`);
+  console.error(JSON.stringify({ event: 'fatal', message: (err instanceof Error && err.message) || String(err) }));
   process.exit(1);
 });

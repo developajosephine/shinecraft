@@ -1,0 +1,14 @@
+{
+  "opId": "aaaaaaaa-0000-4000-8000-000000000002",
+  "seq": 2,
+  "deviceId": "sample-device-A",
+  "recordType": "job",
+  "recordId": "bbbbbbbb-0000-4000-8000-000000000001",
+  "type": "update",
+  "payload": {
+    "status": "paid",
+    "paymentMethod": "cash"
+  },
+  "baseVersion": 1,
+  "clientTimestamp": "2026-01-10T08:20:00.000Z"
+}

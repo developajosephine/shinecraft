@@ -9,6 +9,40 @@ export function createPool(connectionString: string): Pool {
   return new pg.Pool({ connectionString, max: 10 });
 }
 
+/** "host:port/database" — never includes the password. */
+function target(connectionString: string): string {
+  try {
+    const url = new URL(connectionString);
+    return `${url.hostname}:${url.port || 5432}${url.pathname}`;
+  } catch {
+    return 'the configured DATABASE_URL';
+  }
+}
+
+/** Plain-language help for the usual "database is not there" failures, or null for anything else. */
+export function explainDbError(err: unknown, connectionString: string): string | null {
+  const code = (err as { code?: string } | null)?.code;
+  const where = target(connectionString);
+  if (code === 'ECONNREFUSED' || code === 'ENOTFOUND' || code === 'ETIMEDOUT' || code === 'EAI_AGAIN') {
+    return [
+      `Cannot reach PostgreSQL at ${where} - no database is running there.`,
+      '',
+      'Fix it one of two ways:',
+      '  - With Docker: start Docker Desktop, then run "npm run setup" (or "docker compose up -d").',
+      '  - With your own PostgreSQL: create a .env file in the project root containing',
+      '      DATABASE_URL=postgres://USER:PASSWORD@localhost:5432/washlog',
+      '    (see .env.example), then run the command again.',
+    ].join('\n');
+  }
+  if (code === '28P01' || code === '28000') {
+    return `PostgreSQL at ${where} rejected the username or password. Check DATABASE_URL in the .env file in the project root.`;
+  }
+  if (code === '3D000') {
+    return `PostgreSQL is running, but the database in ${where} does not exist. Create it (CREATE DATABASE ...) or fix DATABASE_URL in .env.`;
+  }
+  return null;
+}
+
 const MIGRATION_LOCK = 727000;
 
 /** Apply every .sql file in server/migrations once, in name order. Safe to call on every startup. */

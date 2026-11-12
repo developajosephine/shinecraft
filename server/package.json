@@ -9,7 +9,7 @@
     "start": "node dist/index.js",
     "migrate": "tsx src/migrate.ts",
     "seed": "tsx seed.ts",
-    "test": "vitest run"
+    "test": "vitest run --reporter=verbose"
   },
   "dependencies": {
     "@washlog/shared": "^1.0.0",
