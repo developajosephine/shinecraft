@@ -1,0 +1,96 @@
+WashLog test results
+Generated: 2026-11-12T13:50:42.826Z
+Commit:    5c78ec8
+Node:      v24.14.0
+Command:   npm test
+Exit code: 0
+========================================================================
+
+> washlog@1.0.0 test
+> npm run test -w shared && npm run test -w client && npm run test -w server
+
+
+> @washlog/shared@1.0.0 test
+> vitest run --reporter=verbose
+
+
+ RUN  v5.1.0 /Users/felixtwoli/Development/shinecraft/shared
+
+ ✓ src/conflict.test.ts > resolveLww > later timestamp wins (incoming later) 2ms
+ ✓ src/conflict.test.ts > resolveLww > later timestamp wins (server later) 0ms
+ ✓ src/conflict.test.ts > resolveLww > equal timestamps: greater deviceId wins, regardless of argument order 0ms
+ ✓ src/conflict.test.ts > resolveLww > returns per-field winning and rejected values, flagging money fields 0ms
+ ✓ src/conflict.test.ts > resolveLww > decides each field against the stamp of whoever last wrote THAT field 0ms
+ ✓ src/conflict.test.ts > resolveLww > a device never conflicts with its own earlier write 0ms
+ ✓ src/conflict.test.ts > parseOp > normalises plates 3ms
+ ✓ src/conflict.test.ts > parseOp > rejects unknown fields, bad enums and negative prices with reasons 1ms
+ ✓ src/conflict.test.ts > parseOp > requires every field on create 1ms
+
+ Test Files  1 passed (1)
+      Tests  9 passed (9)
+   Start at  16:50:40
+   Duration  162ms (import 76%, tests 11%, transform 10%, worker 3%)
+
+
+> @washlog/client@1.0.0 test
+> vitest run --reporter=verbose
+
+
+ RUN  v5.1.0 /Users/felixtwoli/Development/shinecraft/client
+
+ ✓ tests/sync.test.ts > sync loop > a failed send leaves the head op in place with the same opId; later ops are not sent 21ms
+ ✓ tests/sync.test.ts > sync loop > records the error and skips the pull when the push fails 9ms
+ ✓ tests/sync.test.ts > sync loop > an op already in ackedOps is skipped and removed, not resent 4ms
+ ✓ tests/sync.test.ts > sync loop > clears pending only when no ops for that record remain 5ms
+ ✓ tests/sync.test.ts > sync loop > pulled changes do not overwrite records with pending ops 7ms
+ ✓ tests/queue.test.ts > operation queue > preserves FIFO order across 3+ ops and dequeues each op only after its ack 25ms
+ ✓ tests/queue.test.ts > operation queue > record update + enqueue are atomic: a failure inside the transaction writes neither 11ms
+ ✓ tests/queue.test.ts > operation queue > keeps multiple ops for the same record as separate queue entries, in order 5ms
+ ✓ tests/queue.test.ts > operation queue > does not queue an op when an edit changes nothing 2ms
+ ✓ tests/queue.test.ts > operation queue > rejects invalid data before anything is written 2ms
+ ✓ tests/queue.test.ts > operation queue > data persists across closing and reopening the database (reload) 7ms
+
+ Test Files  2 passed (2)
+      Tests  11 passed (11)
+   Start at  16:50:40
+   Duration  296ms (import 30%, tests 29%, setup 28%, transform 10%, worker 3%)
+
+
+> @washlog/server@1.0.0 test
+> vitest run --reporter=verbose
+
+
+ RUN  v5.1.0 /Users/felixtwoli/Development/shinecraft/server
+
+ ✓ tests/conflict.test.ts > conflict resolution > two devices update the same record from the same baseVersion -> second is conflict_resolved, later timestamp wins, conflict_log written 48ms
+ ✓ tests/conflict.test.ts > conflict resolution > a stale update with an EARLIER timestamp loses: server value kept, version unchanged, rejection logged 24ms
+ ✓ tests/conflict.test.ts > conflict resolution > equal timestamps: the lexicographically greater deviceId wins, whichever arrives first 40ms
+ ✓ tests/conflict.test.ts > conflict resolution > logs one row per differing field and skips fields both sides agree on 21ms
+ ✓ tests/conflict.test.ts > conflict resolution > edits to different fields both survive, whichever phone syncs first 39ms
+ ✓ tests/conflict.test.ts > conflict resolution > a device's own queued ops chain without conflict (stale baseVersion, same device) 20ms
+ ✓ tests/conflict.test.ts > deletion policy > delete then stale update -> rejected, record stays deleted, rejection logged 18ms
+ ✓ tests/conflict.test.ts > deletion policy > a re-sent create cannot resurrect a tombstoned record 20ms
+ ✓ tests/conflict.test.ts > deletion policy > delete wins from a stale baseVersion, and deleting twice is harmless 25ms
+ ✓ tests/conflict.test.ts > deletion policy > GET /api/conflicts returns the log, newest first 5ms
+ ✓ tests/sync.test.ts > POST /api/sync/ops — apply and dedup > create -> 200 applied, version 1 28ms
+ ✓ tests/sync.test.ts > POST /api/sync/ops — apply and dedup > same op sent twice -> second is duplicate, exactly one row, version unchanged 28ms
+ ✓ tests/sync.test.ts > POST /api/sync/ops — apply and dedup > a duplicated update is not applied twice 27ms
+ ✓ tests/sync.test.ts > POST /api/sync/ops — apply and dedup > concurrent retries of the same op apply it exactly once 21ms
+ ✓ tests/sync.test.ts > POST /api/sync/ops — apply and dedup > lost ack: drop-ack-next answers 503 but commits; retry with the same opId -> duplicate, no duplicate job 20ms
+ ✓ tests/sync.test.ts > POST /api/sync/ops — apply and dedup > fail-next -> 503 and nothing applied; retry -> applied 12ms
+ ✓ tests/sync.test.ts > POST /api/sync/ops — apply and dedup > invalid op -> 400 with reasons, nothing written, opId not recorded 27ms
+ ✓ tests/sync.test.ts > POST /api/sync/ops — apply and dedup > rejects bodies over 100kb and malformed JSON without writing 9ms
+ ✓ tests/api.test.ts > auth > missing or wrong token -> 401 on every protected route, and nothing is written 29ms
+ ✓ tests/api.test.ts > GET /healthz > -> 200 with db ok and the revision, no token needed 3ms
+ ✓ tests/api.test.ts > GET /healthz > -> 503 when the database is unreachable 4ms
+ ✓ tests/api.test.ts > GET /api/sync/changes > returns only changes newer than `since`, including tombstones 56ms
+ ✓ tests/api.test.ts > GET /api/sync/changes > rejects a malformed since 3ms
+ ✓ tests/api.test.ts > GET /api/records > lists all current records 3ms
+ ✓ tests/api.test.ts > demo toggles and migrations > demo endpoints return 404 when DEMO_MODE is off 3ms
+ ✓ tests/api.test.ts > demo toggles and migrations > migrations are idempotent: running them again changes nothing and keeps data 4ms
+
+ Test Files  3 passed (3)
+      Tests  26 passed (26)
+   Start at  16:50:41
+   Duration  1.46s (tests 66%, import 31%, transform 2%, worker 1%)
+
