@@ -98,7 +98,8 @@ Then run `npm run setup`; it sees `DATABASE_URL` and skips Docker.
 | `GIT_SHA` | server | reported as `revision` by `/healthz` |
 | `DEMO_MODE` | server | `true` enables the demo failure toggles |
 | `TEST_DATABASE_URL` | server tests | PostgreSQL used by `npm test` |
-| `VITE_SYNC_TOKEN` | client build | token baked into the client; must equal `SYNC_TOKEN` |
+| `SEED_ON_START` | server | `true` loads the synthetic demo data on startup (idempotent) |
+| `VITE_SYNC_TOKEN` | client build | optional fallback only; the client normally reads the token from the server at runtime (`/app-config.json`) |
 
 For local development no `.env` is needed: outside `NODE_ENV=production` the server falls back to the docker-compose databases and a development-only token. In production `DATABASE_URL` and `SYNC_TOKEN` are required and the server refuses to start without them.
 
@@ -182,7 +183,7 @@ The response is `{ opId, status, record, conflict }` with status `applied`, `dup
 
 **Validation and auth.** Every op is validated with the shared zod schema; an invalid op gets `400` with reasons, nothing is written and the op ID is not recorded. All `/api/*` routes require `Authorization: Bearer <SYNC_TOKEN>` and return `401` otherwise. JSON bodies are limited to 100 kb.
 
-**Other endpoints:** `GET /healthz` (`{status, db, revision}`, 503 if the database is unreachable), `GET /api/conflicts`, `GET /api/records`, and when `DEMO_MODE=true`: `POST /api/demo/fail-next` (next op gets 503, nothing applied) and `POST /api/demo/drop-ack-next` (next op is applied and committed, then answered with 503).
+**Other endpoints:** `GET /app-config.json` (gives the client its sync token at runtime), `GET /healthz` (`{status, db, revision}`, 503 if the database is unreachable), `GET /api/conflicts`, `GET /api/records`, and when `DEMO_MODE=true`: `POST /api/demo/fail-next` (next op gets 503, nothing applied) and `POST /api/demo/drop-ack-next` (next op is applied and committed, then answered with 503).
 
 ## 7. Conflict and deletion policy
 
@@ -248,7 +249,7 @@ The demo script in section 8 was also run in a browser against the production bu
 ## 11. Known limitations
 
 - **Client clocks decide conflicts.** Last-writer-wins uses each phone's clock. A phone with a wrong clock can win or lose unfairly. The conflict log makes this visible but does not prevent it.
-- **One shared token, no per-user auth.** The token is baked into the client bundle, so anyone with the app can read it. `deviceId` and attendant name are self-declared.
+- **One shared token, no per-user auth.** The app hands the token to every browser that loads it (`/app-config.json`), so anyone with the URL can read it. It keeps casual traffic off the API; it is not user authentication. `deviceId` and attendant name are self-declared.
 - **A rejected op blocks the queue.** By design the loop never skips the head. The client validates with the same schema as the server so a `400` should not occur, but if it did, later ops would wait behind it.
 - **No pruning.** `ackedOps` on the phone and `processed_ops` and `conflict_log` on the server grow without bound. The phone keeps a copy of the latest 200 conflict entries.
 - **Pull is not paginated** and list screens filter in memory; fine for one car wash, not for thousands of records.

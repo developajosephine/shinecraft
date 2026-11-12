@@ -52,6 +52,12 @@ export function createApp(opts: AppOptions) {
     }
   });
 
+  // The client reads its sync token from here at runtime, so one image works with any token.
+  // This does not weaken anything: the token already has to reach every browser that runs the app.
+  app.get('/app-config.json', (_req, res) => {
+    res.set('Cache-Control', 'no-store').json({ syncToken });
+  });
+
   app.post('/api/sync/ops', requireAuth, async (req, res) => {
     const started = performance.now();
     const done = (opId: unknown, status: string) =>

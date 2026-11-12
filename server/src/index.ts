@@ -1,6 +1,7 @@
 import { createApp } from './app';
 import { loadConfig } from './config';
 import { createPool, explainDbError, migrate } from './db';
+import { seedDemoData } from './seedData';
 
 let databaseUrl = '';
 
@@ -12,6 +13,10 @@ async function main() {
 
   const applied = await migrate(pool);
   console.log(JSON.stringify({ event: 'migrated', applied }));
+
+  if (config.seedOnStart) {
+    console.log(JSON.stringify({ event: 'seeded', result: await seedDemoData(pool) }));
+  }
 
   const app = createApp({ pool, ...config });
   const server = app.listen(config.port, () => {

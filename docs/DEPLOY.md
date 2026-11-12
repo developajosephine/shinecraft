@@ -12,14 +12,15 @@ WashLog deploys as **one container** (app + API on one URL) plus **one PostgreSQ
 | `GIT_SHA` | no | Shown as `revision` in `/healthz`. Can also be passed as a build arg. |
 | `DEMO_MODE` | no | Set to `true` only if the demo failure toggles are wanted. |
 
-Build argument: `VITE_SYNC_TOKEN` — must equal `SYNC_TOKEN`. It is compiled into the client bundle, so changing the token means rebuilding the image.
+| `SEED_ON_START` | no | `true` loads the synthetic demo data on every start (idempotent). Use it when the database cannot be reached from outside the platform. |
+
+No build arguments are required. The client reads the sync token from the server at runtime, so changing `SYNC_TOKEN` only needs a restart. (`VITE_SYNC_TOKEN` still works as an optional build-time fallback.)
 
 ## Generic Docker steps
 
 ```bash
 # 1. Build (from the repository root)
 docker build \
-  --build-arg VITE_SYNC_TOKEN="$SYNC_TOKEN" \
   --build-arg GIT_SHA="$(git rev-parse --short HEAD)" \
   -t washlog .
 
