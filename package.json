@@ -1,0 +1,27 @@
+{
+  "name": "washlog",
+  "version": "1.0.0",
+  "private": true,
+  "description": "WashLog — offline-first car wash tracker (Zetech Forge, Challenge B)",
+  "workspaces": [
+    "shared",
+    "client",
+    "server"
+  ],
+  "engines": {
+    "node": ">=20.12"
+  },
+  "scripts": {
+    "dev": "concurrently -n server,client -c blue,green \"npm run dev -w server\" \"npm run dev -w client\"",
+    "build": "npm run build -w shared && npm run build -w client && npm run build -w server",
+    "start": "node server/dist/index.js",
+    "migrate": "npm run migrate -w server",
+    "seed": "npm run seed -w server",
+    "test": "npm run test -w shared && npm run test -w client && npm run test -w server",
+    "test:report": "node scripts/test-report.mjs"
+  },
+  "devDependencies": {
+    "concurrently": "^10.0.7",
+    "typescript": "^7.0.2"
+  }
+}
