@@ -1,6 +1,7 @@
 import {
   resolveLww,
   type ConflictInfo,
+  type FieldStamps,
   type ConflictLogEntry,
   type Op,
   type SyncResponse,
@@ -20,6 +21,7 @@ interface RecordRow {
   deleted: boolean;
   deleted_at: Date | null;
   change_seq: string;
+  field_stamps: FieldStamps;
 }
 
 export function rowToRecord(row: RecordRow): WashRecord {
@@ -38,6 +40,13 @@ export function rowToRecord(row: RecordRow): WashRecord {
 const NEXT_SEQ = `nextval(pg_get_serial_sequence('records', 'change_seq'))`;
 const WRITE_LOCK = 727001;
 
+/** Stamp the given fields as last written by this op. */
+function stamp(existing: FieldStamps, fields: string[], op: Op): FieldStamps {
+  const stamps = { ...existing };
+  for (const field of fields) stamps[field] = { timestamp: op.clientTimestamp, deviceId: op.deviceId };
+  return stamps;
+}
+
 async function logConflict(client: pg.PoolClient, op: Op, conflict: ConflictInfo): Promise<void> {
   for (const f of conflict.fields) {
     await client.query(
@@ -50,8 +59,8 @@ async function logConflict(client: pg.PoolClient, op: Op, conflict: ConflictInfo
         f.field,
         JSON.stringify(f.winningValue ?? null),
         JSON.stringify(f.rejectedValue ?? null),
-        conflict.winningDevice,
-        conflict.rejectedDevice,
+        f.winningDevice,
+        f.rejectedDevice,
         f.policy,
       ],
     );
@@ -69,9 +78,16 @@ async function applyOp(
   if (!row) {
     if (op.type !== 'create') return { status: 'rejected', row: null, conflict: null };
     const inserted = await client.query<RecordRow>(
-      `INSERT INTO records (id, record_type, data, version, updated_at, updated_by, deleted, deleted_at)
-       VALUES ($1, $2, $3::jsonb, 1, $4, $5, false, NULL) RETURNING *`,
-      [op.recordId, op.recordType, JSON.stringify(op.payload), op.clientTimestamp, op.deviceId],
+      `INSERT INTO records (id, record_type, data, version, updated_at, updated_by, deleted, deleted_at, field_stamps)
+       VALUES ($1, $2, $3::jsonb, 1, $4, $5, false, NULL, $6::jsonb) RETURNING *`,
+      [
+        op.recordId,
+        op.recordType,
+        JSON.stringify(op.payload),
+        op.clientTimestamp,
+        op.deviceId,
+        JSON.stringify(stamp({}, Object.keys(op.payload), op)),
+      ],
     );
     return { status: 'applied', row: inserted.rows[0], conflict: null };
   }
@@ -95,47 +111,62 @@ async function applyOp(
     // Tombstones win: the record cannot be resurrected.
     const conflict: ConflictInfo = {
       winner: 'server',
-      winningDevice: row.updated_by,
-      rejectedDevice: op.deviceId,
-      fields: [{ field: '(record)', winningValue: 'deleted', rejectedValue: op.payload, policy: 'tombstone' }],
+      fields: [
+        {
+          field: '(record)',
+          winningValue: 'deleted',
+          rejectedValue: op.payload,
+          winningDevice: row.updated_by,
+          rejectedDevice: op.deviceId,
+          policy: 'tombstone',
+        },
+      ],
     };
     await logConflict(client, op, conflict);
     return { status: 'rejected', row, conflict };
   }
 
-  const write = async (data: Record<string, unknown>) =>
+  /** Write the given payload fields, stamp them, bump version and change_seq. */
+  const write = async (data: Record<string, unknown>, fields: string[]) =>
     (
       await client.query<RecordRow>(
-        `UPDATE records SET data = $2::jsonb, version = version + 1,
-                updated_at = $3, updated_by = $4, change_seq = ${NEXT_SEQ}
+        `UPDATE records SET data = $2::jsonb, field_stamps = $3::jsonb, version = version + 1,
+                updated_at = $4, updated_by = $5, change_seq = ${NEXT_SEQ}
          WHERE id = $1 RETURNING *`,
-        [op.recordId, JSON.stringify(data), op.clientTimestamp, op.deviceId],
+        [
+          op.recordId,
+          JSON.stringify(data),
+          JSON.stringify(stamp(row.field_stamps, fields, op)),
+          op.clientTimestamp,
+          op.deviceId,
+        ],
       )
     ).rows[0];
 
-  // A stale baseVersion is only a conflict if ANOTHER device wrote in between. A device's own
-  // queued ops (create, edit, edit — all made offline on the same base) chain without conflict.
-  const stale = op.baseVersion !== null && op.baseVersion < row.version && row.updated_by !== op.deviceId;
-  if (op.type === 'create' ? row.updated_by === op.deviceId : !stale) {
-    return { status: 'applied', row: await write({ ...row.data, ...op.payload }), conflict: null };
+  // Fast path: the client edited the version the server still has.
+  if (op.type === 'update' && op.baseVersion === row.version) {
+    return { status: 'applied', row: await write({ ...row.data, ...op.payload }, Object.keys(op.payload)), conflict: null };
   }
 
+  // Stale baseVersion (or a re-sent create): resolve field by field with the shared LWW function.
   const resolved = resolveLww(
-    { data: row.data, updatedAt: row.updated_at.toISOString(), updatedBy: row.updated_by },
+    {
+      data: row.data,
+      updatedAt: row.updated_at.toISOString(),
+      updatedBy: row.updated_by,
+      fieldStamps: row.field_stamps,
+    },
     { payload: op.payload, clientTimestamp: op.clientTimestamp, deviceId: op.deviceId },
   );
-  const conflict: ConflictInfo = {
-    winner: resolved.winner,
-    winningDevice: resolved.winningDevice,
-    rejectedDevice: resolved.rejectedDevice,
-    fields: resolved.fields,
-  };
+  const next = resolved.accepted.length > 0 ? await write(resolved.merged, resolved.accepted) : row;
+
+  // No contested field (e.g. this phone's own queued edits, or a different field than the
+  // other phone touched and nothing differed): a plain apply.
+  if (resolved.fields.length === 0) return { status: 'applied', row: next, conflict: null };
+
+  const conflict: ConflictInfo = { winner: resolved.winner, fields: resolved.fields };
   await logConflict(client, op, conflict);
-  return {
-    status: 'conflict_resolved',
-    row: resolved.changed ? await write(resolved.merged) : row,
-    conflict,
-  };
+  return { status: 'conflict_resolved', row: next, conflict };
 }
 
 /**

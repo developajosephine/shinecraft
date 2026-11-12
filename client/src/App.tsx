@@ -27,6 +27,7 @@ export default function App() {
     return id && name ? { deviceId: id.value as string, deviceName: name.value as string } : null;
   });
   const pendingCount = useLiveQuery(() => db.opQueue.count(), [], 0);
+  const lastError = useLiveQuery(async () => ((await db.meta.get('lastError'))?.value as string | null) ?? null, [], null);
   const online = useOnline();
   const route = useHashRoute();
   const [syncing, setSyncing] = useState(false);
@@ -63,6 +64,10 @@ export default function App() {
   if (device === undefined) return null;
   if (device === null) return <Setup />;
 
+  // navigator.onLine only says "has a network"; a failed sync says the server was not reachable.
+  const link = !online ? 'off' : lastError ? 'warn' : 'on';
+  const linkLabel = { off: 'Offline', warn: 'Sync failed', on: 'Online' }[link];
+
   const tab = route[0] ?? 'jobs';
   let view;
   if (tab === 'job') {
@@ -86,12 +91,15 @@ export default function App() {
         <strong>WashLog</strong>
         <span className="device">{device.deviceName}</span>
         <button className="pill" onClick={() => go('sync')} aria-label="Open sync panel">
-          <span className={`dot ${online ? 'on' : 'off'}`} />
-          {online ? 'Online' : 'Offline'}
+          <span className={`dot ${link}`} />
+          {linkLabel}
           {pendingCount > 0 && <span className="count">{pendingCount} pending</span>}
         </button>
       </header>
-      {!online && <div className="offline-banner">Offline — changes saved on this phone</div>}
+      {link === 'off' && <div className="offline-banner">Offline — changes saved on this phone</div>}
+      {link === 'warn' && (
+        <div className="offline-banner">Last sync failed — changes saved on this phone</div>
+      )}
       <main>{view}</main>
       <nav className="tabs">
         {TABS.map(([key, label]) => (

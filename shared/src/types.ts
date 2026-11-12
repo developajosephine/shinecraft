@@ -69,13 +69,14 @@ export interface FieldConflict {
   field: string;
   winningValue: unknown;
   rejectedValue: unknown;
+  winningDevice: string;
+  rejectedDevice: string;
   policy: ConflictPolicy;
 }
 
 export interface ConflictInfo {
-  winner: 'server' | 'incoming';
-  winningDevice: string;
-  rejectedDevice: string;
+  /** 'incoming' = every contested field went to the pushed op, 'server' = none did, 'mixed' = some. */
+  winner: 'server' | 'incoming' | 'mixed';
   fields: FieldConflict[];
 }
 

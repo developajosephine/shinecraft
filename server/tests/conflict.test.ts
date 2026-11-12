@@ -44,9 +44,16 @@ describe('conflict resolution', () => {
     const b = await push(ctx, updateOp(id, { priceKes: 500 }, { deviceId: 'device-B', clientTimestamp: T2 }));
     expect(b.status).toBe(200);
     expect(b.body.status).toBe('conflict_resolved');
-    expect(b.body.conflict).toMatchObject({ winner: 'incoming', winningDevice: 'device-B', rejectedDevice: 'device-A' });
+    expect(b.body.conflict.winner).toBe('incoming');
     expect(b.body.conflict.fields).toEqual([
-      { field: 'priceKes', winningValue: 500, rejectedValue: 300, policy: 'lww-flag-money' },
+      {
+        field: 'priceKes',
+        winningValue: 500,
+        rejectedValue: 300,
+        winningDevice: 'device-B',
+        rejectedDevice: 'device-A',
+        policy: 'lww-flag-money',
+      },
     ]);
     // B won its field; A's status change (a different field) survives.
     expect(b.body.record).toMatchObject({ version: 3, priceKes: 500, status: 'paid', updatedBy: 'device-B' });
@@ -70,7 +77,8 @@ describe('conflict resolution', () => {
 
     const b = await push(ctx, updateOp(id, { status: 'washing' }, { deviceId: 'device-B', clientTimestamp: T1 }));
     expect(b.body.status).toBe('conflict_resolved');
-    expect(b.body.conflict).toMatchObject({ winner: 'server', winningDevice: 'device-A', rejectedDevice: 'device-B' });
+    expect(b.body.conflict.winner).toBe('server');
+    expect(b.body.conflict.fields[0]).toMatchObject({ winningDevice: 'device-A', rejectedDevice: 'device-B' });
     expect(b.body.record).toMatchObject({ version: 2, status: 'done' });
 
     const log = await logFor(id);
@@ -83,14 +91,14 @@ describe('conflict resolution', () => {
     const first = await newJob();
     await push(ctx, updateOp(first, { priceKes: 400 }, { deviceId: 'device-A', clientTimestamp: T1 }));
     const bSecond = await push(ctx, updateOp(first, { priceKes: 600 }, { deviceId: 'device-B', clientTimestamp: T1 }));
-    expect(bSecond.body.conflict.winningDevice).toBe('device-B');
+    expect(bSecond.body.conflict.fields[0].winningDevice).toBe('device-B');
     expect(bSecond.body.record.priceKes).toBe(600);
 
     // A arrives second
     const second = await newJob();
     await push(ctx, updateOp(second, { priceKes: 600 }, { deviceId: 'device-B', clientTimestamp: T1 }));
     const aSecond = await push(ctx, updateOp(second, { priceKes: 400 }, { deviceId: 'device-A', clientTimestamp: T1 }));
-    expect(aSecond.body.conflict.winningDevice).toBe('device-B');
+    expect(aSecond.body.conflict.fields[0].winningDevice).toBe('device-B');
     expect(aSecond.body.record.priceKes).toBe(600);
   });
 
@@ -111,6 +119,23 @@ describe('conflict resolution', () => {
       ['mpesaCode', 'lww-flag-money'],
       ['paymentMethod', 'lww-flag-money'],
     ]); // status is 'paid' on both sides -> not a conflict
+  });
+
+  it('edits to different fields both survive, whichever phone syncs first', async () => {
+    const final: Record<string, unknown>[] = [];
+    for (const order of ['A-first', 'B-first']) {
+      const create = createOp({ deviceId: 'device-C', payload: jobPayload({ status: 'washing', priceKes: 300 }) });
+      await push(ctx, create);
+      const a = updateOp(create.recordId, { status: 'paid' }, { deviceId: 'device-A', clientTimestamp: T1 });
+      const b = updateOp(create.recordId, { priceKes: 500 }, { deviceId: 'device-B', clientTimestamp: T2 });
+      const [first, second] = order === 'A-first' ? [a, b] : [b, a];
+      expect((await push(ctx, first)).body.status).toBe('applied');
+      const res = await push(ctx, second);
+      expect(res.body.status).toBe('conflict_resolved');
+      final.push({ status: res.body.record.status, priceKes: res.body.record.priceKes, version: res.body.record.version });
+    }
+    expect(final[0]).toEqual({ status: 'paid', priceKes: 500, version: 3 });
+    expect(final[1]).toEqual(final[0]); // same end state in both orders
   });
 
   it("a device's own queued ops chain without conflict (stale baseVersion, same device)", async () => {
