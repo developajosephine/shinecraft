@@ -1,0 +1,55 @@
+# Local development. `docker compose up -d` starts the two databases;
+# `docker compose --profile app up --build` also builds and runs the production image on :8080.
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: washlog
+      POSTGRES_PASSWORD: washlog
+      POSTGRES_DB: washlog
+    ports:
+      - "5433:5432"
+    volumes:
+      - washlog-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U washlog -d washlog"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  postgres-test:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: washlog
+      POSTGRES_PASSWORD: washlog
+      POSTGRES_DB: washlog_test
+    ports:
+      - "5434:5432"
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U washlog -d washlog_test"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  app:
+    profiles: ["app"]
+    build:
+      context: .
+      args:
+        VITE_SYNC_TOKEN: dev-token
+        GIT_SHA: local-docker
+    environment:
+      DATABASE_URL: postgres://washlog:washlog@postgres:5432/washlog
+      SYNC_TOKEN: dev-token
+      PORT: "8080"
+      DEMO_MODE: "true"
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  washlog-pgdata:
