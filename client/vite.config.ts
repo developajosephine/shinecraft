@@ -23,7 +23,7 @@ export default defineConfig({
         // Precache the whole app shell so a reload with no network still boots.
         globPatterns: ['**/*.{js,css,html,svg,png,ico,webmanifest}'],
         navigateFallback: 'index.html',
-        navigateFallbackDenylist: [/^\/api\//, /^\/healthz/],
+        navigateFallbackDenylist: [/^\/api\//, /^\/healthz/, /^\/app-config\.json/],
       },
     }),
   ],
@@ -31,6 +31,7 @@ export default defineConfig({
     proxy: {
       '/api': 'http://localhost:8080',
       '/healthz': 'http://localhost:8080',
+      '/app-config.json': 'http://localhost:8080',
     },
   },
 });

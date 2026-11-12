@@ -1,18 +1,55 @@
 import type { ChangesResponse, ConflictLogEntry, SyncResponse } from '@washlog/shared';
 import type { Transport } from './sync';
 
-const TOKEN: string = import.meta.env.VITE_SYNC_TOKEN || 'dev-token';
+const BUILD_TOKEN: string = import.meta.env.VITE_SYNC_TOKEN || 'dev-token';
+const TOKEN_KEY = 'washlog.syncToken';
 const TIMEOUT_MS = 8000;
 
-async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+let token: string | null = null;
+
+/**
+ * The sync token comes from the server at runtime (/app-config.json) and is remembered on the
+ * phone so it is still there offline. The build-time value is only a fallback.
+ */
+async function getToken(refresh = false): Promise<string> {
+  if (token && !refresh) return token;
+  if (!refresh) {
+    try {
+      const saved = localStorage.getItem(TOKEN_KEY);
+      if (saved) return (token = saved);
+    } catch {
+      /* storage unavailable */
+    }
+  }
+  try {
+    const res = await fetch('/app-config.json', { cache: 'no-store' });
+    const body = res.ok ? await res.json() : null;
+    if (body?.syncToken) {
+      token = body.syncToken as string;
+      try {
+        localStorage.setItem(TOKEN_KEY, token);
+      } catch {
+        /* storage unavailable */
+      }
+      return token;
+    }
+  } catch {
+    /* offline or no such endpoint */
+  }
+  return token ?? BUILD_TOKEN;
+}
+
+async function request<T>(path: string, init: RequestInit = {}, retried = false): Promise<T> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
   try {
     const res = await fetch(path, {
       ...init,
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${TOKEN}` },
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${await getToken(retried)}` },
       signal: controller.signal,
     });
+    // The server's token may have changed since this phone saved it: fetch it again, once.
+    if (res.status === 401 && !retried) return await request<T>(path, init, true);
     if (!res.ok) {
       let detail = '';
       try {

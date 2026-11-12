@@ -17,6 +17,8 @@ export interface Config {
   syncToken: string;
   demoMode: boolean;
   revision: string;
+  /** Load the synthetic demo data on startup (for hosts whose database cannot be reached from outside). */
+  seedOnStart: boolean;
 }
 
 export function loadConfig(): Config {
@@ -40,5 +42,6 @@ export function loadConfig(): Config {
     // Demo toggles must be switched on explicitly in production.
     demoMode: process.env.DEMO_MODE ? process.env.DEMO_MODE === 'true' : !production,
     revision: process.env.GIT_SHA || 'dev',
+    seedOnStart: process.env.SEED_ON_START === 'true',
   };
 }
