@@ -1,0 +1,11 @@
+{
+  "opId": "aaaaaaaa-0000-4000-8000-000000000004",
+  "seq": 3,
+  "deviceId": "sample-device-A",
+  "recordType": "job",
+  "recordId": "bbbbbbbb-0000-4000-8000-000000000001",
+  "type": "delete",
+  "payload": {},
+  "baseVersion": 3,
+  "clientTimestamp": "2026-01-10T08:40:00.000Z"
+}

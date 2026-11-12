@@ -10,7 +10,7 @@
   },
   "scripts": {
     "build": "tsc --noEmit -p tsconfig.json",
-    "test": "vitest run"
+    "test": "vitest run --reporter=verbose"
   },
   "dependencies": {
     "zod": "^4.6.7"

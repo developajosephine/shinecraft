@@ -1,0 +1,13 @@
+{
+  "opId": "aaaaaaaa-0000-4000-8000-000000000005",
+  "seq": 2,
+  "deviceId": "sample-device-B",
+  "recordType": "job",
+  "recordId": "bbbbbbbb-0000-4000-8000-000000000001",
+  "type": "update",
+  "payload": {
+    "status": "washing"
+  },
+  "baseVersion": 3,
+  "clientTimestamp": "2026-01-10T08:45:00.000Z"
+}
