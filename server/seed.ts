@@ -5,7 +5,7 @@
  */
 import { parseOp, type Op } from '@washlog/shared';
 import { loadConfig } from './src/config';
-import { createPool, migrate } from './src/db';
+import { createPool, explainDbError, migrate } from './src/db';
 import { handleOp } from './src/syncService';
 
 const DEVICE = 'seed-script';
@@ -78,7 +78,8 @@ SUPPLIES.forEach(([item, quantity, unit], i) => {
   });
 });
 
-const pool = createPool(loadConfig().databaseUrl);
+const { databaseUrl } = loadConfig();
+const pool = createPool(databaseUrl);
 try {
   await migrate(pool);
   const tally: Record<string, number> = {};
@@ -89,6 +90,11 @@ try {
     tally[status] = (tally[status] ?? 0) + 1;
   }
   console.log(`Seeded ${ops.length} synthetic ops (25 jobs, 5 supplies, 3 attendants):`, tally);
+} catch (err) {
+  const help = explainDbError(err, databaseUrl);
+  if (!help) throw err;
+  console.error(`\n${help}\n`);
+  process.exitCode = 1;
 } finally {
   await pool.end();
 }

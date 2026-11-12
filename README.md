@@ -57,7 +57,36 @@ No sync or replication library is used. The queue, record map, op-ID set and con
 
 ## 4. Setup
 
-**Prerequisites:** Node.js ≥ 20.12, npm ≥ 10, Docker (for PostgreSQL).
+**Prerequisites:** Node.js ≥ 20.12, npm ≥ 10, and a PostgreSQL database: either Docker Desktop (easiest, nothing to configure) or your own PostgreSQL.
+
+**Quick start (one command)**
+
+```bash
+npm install
+npm run setup    # starts the databases, creates the tables, loads the demo data
+npm run dev      # then open http://localhost:5173
+```
+
+`npm run setup` checks Node and Docker, tells you in plain words what is missing, and is safe to run again.
+
+**Without Docker.** Create two databases (`washlog` and `washlog_test`) in your own PostgreSQL, copy `.env.example` to `.env` **in the repository root**, and set:
+
+```
+DATABASE_URL=postgres://USER:PASSWORD@localhost:5432/washlog
+TEST_DATABASE_URL=postgres://USER:PASSWORD@localhost:5432/washlog_test
+```
+
+Then run `npm run setup`; it sees `DATABASE_URL` and skips Docker.
+
+**Troubleshooting**
+
+| Message | Cause | Fix |
+|---|---|---|
+| `Cannot reach PostgreSQL at localhost:5433` or `ECONNREFUSED` | no database is running | start Docker Desktop and run `npm run setup`, or use the no-Docker steps above |
+| `Docker is installed but not running` | Docker Desktop is closed | open it, wait until it is running, run `npm run setup` again |
+| `rejected the username or password` | wrong credentials in `.env` | fix `DATABASE_URL` |
+| `.env` seems ignored | wrong folder, or saved as `.env.txt` | it must be named exactly `.env`, next to the root `package.json` |
+| `401` in the Sync panel | client and server tokens differ | make `SYNC_TOKEN` and `VITE_SYNC_TOKEN` equal, restart `npm run dev` |
 
 **Environment variables** (names only; see [`.env.example`](.env.example)):
 
@@ -73,7 +102,7 @@ No sync or replication library is used. The queue, record map, op-ID set and con
 
 For local development no `.env` is needed: outside `NODE_ENV=production` the server falls back to the docker-compose databases and a development-only token. In production `DATABASE_URL` and `SYNC_TOKEN` are required and the server refuses to start without them.
 
-**Run locally**
+**Run locally, step by step** (what `npm run setup` does for you)
 
 ```bash
 npm install

@@ -1,8 +1,16 @@
 import { randomUUID } from 'node:crypto';
+import path from 'node:path';
 import request from 'supertest';
 import { createApp } from '../src/app';
 import { DEV_TEST_DATABASE_URL } from '../src/config';
 import { createPool, migrate, type Pool } from '../src/db';
+
+// Pick up TEST_DATABASE_URL from the repo-root .env, if there is one (real env vars win).
+try {
+  process.loadEnvFile(path.resolve(import.meta.dirname, '../../.env'));
+} catch {
+  /* no .env - use the docker-compose test database */
+}
 
 export const TOKEN = 'test-token';
 export const auth = { Authorization: `Bearer ${TOKEN}` };
