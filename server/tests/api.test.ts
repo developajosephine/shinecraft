@@ -1,8 +1,9 @@
 import request from 'supertest';
+import { DEFAULT_CATALOG } from '@washlog/shared';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createApp } from '../src/app';
 import { createPool, migrate } from '../src/db';
-import { auth, count, createOp, deleteOp, push, setup, TOKEN, updateOp, type TestContext } from './helpers';
+import { auth, count, createOp, deleteOp, jobPayload, push, setup, T0, T2, TOKEN, updateOp, type TestContext } from './helpers';
 
 let ctx: TestContext;
 beforeAll(async () => {
@@ -102,3 +103,77 @@ describe('demo toggles and migrations', () => {
     expect(await count(ctx, 'records')).toBe(before);
   });
 });
+
+describe('data visible in the database', () => {
+  it('every job field the phone sends is stored and readable as a column in the jobs view', async () => {
+    const op = createOp({
+      payload: jobPayload({
+        plate: 'kcx 901z',
+        vehicleType: 'matatu',
+        service: 'full',
+        priceKes: 800,
+        status: 'paid',
+        paymentMethod: 'mpesa',
+        mpesaCode: 'QWE123RTY',
+        attendant: 'Attendant 2',
+        waterLitres: 110.5,
+      }),
+    });
+    expect((await push(ctx, op)).body.status).toBe('applied');
+
+    const row = (await ctx.pool.query('SELECT * FROM jobs WHERE id = $1', [op.recordId])).rows[0];
+    expect(row).toMatchObject({
+      plate: 'KCX 901Z',
+      vehicle_type: 'matatu',
+      vehicle_label: 'Matatu',
+      service: 'full',
+      service_label: 'Full wash',
+      price_kes: 800,
+      status: 'paid',
+      payment_method: 'mpesa',
+      mpesa_code: 'QWE123RTY',
+      attendant: 'Attendant 2',
+      version: 1,
+      updated_by: 'device-A',
+    });
+    expect(Number(row.water_litres)).toBe(110.5);
+    expect(row.created_at.toISOString()).toBe(T0);
+
+    // an update shows up too; a deleted job leaves the view but stays in records
+    await push(ctx, updateOp(op.recordId, { service: 'interior', vehicleType: 'suv' }));
+    const updated = (await ctx.pool.query('SELECT service, vehicle_type FROM jobs WHERE id = $1', [op.recordId])).rows[0];
+    expect(updated).toEqual({ service: 'interior', vehicle_type: 'suv' });
+    await push(ctx, deleteOp(op.recordId, { baseVersion: 2, clientTimestamp: T2 }));
+    expect((await ctx.pool.query('SELECT 1 FROM jobs WHERE id = $1', [op.recordId])).rowCount).toBe(0);
+    expect(await isTombstoned(op.recordId)).toBe(true);
+  });
+
+  it('supplies are readable as columns in the supplies view', async () => {
+    const op = createOp({ recordType: 'supply', payload: { item: 'Car shampoo', quantity: 12.5, unit: 'litres' } });
+    expect((await push(ctx, op)).body.status).toBe('applied');
+    const row = (await ctx.pool.query('SELECT item, quantity, unit, unit_label FROM supplies WHERE id = $1', [op.recordId])).rows[0];
+    expect({ ...row, quantity: Number(row.quantity) }).toEqual({ item: 'Car shampoo', quantity: 12.5, unit: 'litres', unit_label: 'litres' });
+  });
+
+  it('lookup tables are seeded with the built-in vehicle types, services and units', async () => {
+    const res = await request(ctx.app).get('/api/catalog').set(auth);
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual(DEFAULT_CATALOG);
+    expect((await request(ctx.app).get('/api/catalog')).status).toBe(401);
+  });
+
+  it('a default price or name changed in the database is served to phones; edits survive a re-run of migrations', async () => {
+    await ctx.pool.query("UPDATE services SET default_price_kes = 350, label = 'Body only' WHERE code = 'body'");
+    await ctx.pool.query("UPDATE vehicle_types SET default_water_litres = 45 WHERE code = 'saloon'");
+    expect(await migrate(ctx.pool)).toEqual([]);
+    const res = await request(ctx.app).get('/api/catalog').set(auth);
+    expect(res.body.services[0]).toEqual({ code: 'body', label: 'Body only', defaultPriceKes: 350 });
+    expect(res.body.vehicleTypes[0]).toEqual({ code: 'saloon', label: 'Saloon', defaultWaterLitres: 45 });
+    // codes outside the app's fixed list cannot be added
+    await expect(ctx.pool.query("INSERT INTO services (code, label, default_price_kes, sort_order) VALUES ('polish', 'Polish', 900, 9)")).rejects.toThrow();
+  });
+});
+
+async function isTombstoned(id: string): Promise<boolean> {
+  return (await ctx.pool.query('SELECT deleted FROM records WHERE id = $1', [id])).rows[0]?.deleted === true;
+}

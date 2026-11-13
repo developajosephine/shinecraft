@@ -37,13 +37,14 @@ flowchart LR
     SW[Service worker<br/>precached app shell]
   end
   subgraph Server["One service (Node 20 + Express)"]
-    API["/api/sync/ops · /api/sync/changes<br/>/api/conflicts · /healthz"]
+    API["/api/sync/ops · /api/sync/changes<br/>/api/conflicts · /api/catalog · /healthz"]
     STATIC[Static client/dist + SPA fallback]
   end
   subgraph PG[(PostgreSQL)]
     R[records]
     P[processed_ops]
     C[conflict_log]
+    V[jobs / supplies views<br/>vehicle_types · services · supply_units]
   end
   LOOP -- "POST one op (Bearer token)" --> API
   API -- "applied / duplicate /<br/>conflict_resolved / rejected" --> LOOP
@@ -144,6 +145,15 @@ Sent in order, the five samples return `applied`, `applied`, `conflict_resolved`
 | **Record map** | Dexie `records`, key `id` | current local state of every job and supply | get/put average O(1) as a hash map |
 | **Op-ID set** | Dexie `ackedOps`, key `opId` | operations the server has acknowledged | membership/insert average O(1) as a hash set |
 | **Processed-ops index** | PostgreSQL `processed_ops` primary key | server-side exactly-once guard | O(log n) B-tree lookup/insert |
+
+**What is in PostgreSQL.** Every job and supply is one row in `records`. Its fields (plate, vehicle type, service, price, status, payment method, M-Pesa code, attendant, water, created time; item, quantity, unit) are stored in the `data` jsonb column, which is the source of truth for sync and conflict resolution. To read them as ordinary columns, query the views added in migration `004_readable_data.sql`:
+
+```sql
+SELECT plate, vehicle_type, service, price_kes, status, payment_method, attendant, water_litres, created_at FROM jobs;
+SELECT item, quantity, unit FROM supplies;
+```
+
+The views leave out deleted records (they stay in `records` as tombstones). The reference data is in tables too: `vehicle_types` (name, default water), `services` (name, default price) and `supply_units`, seeded from `shared/src/catalog.ts`. A manager can change a name or a default price there; phones fetch it on their next sync (`GET /api/catalog`) and keep using the built-in values while offline. The codes themselves are fixed by the app's schema, so new vehicle types or services still need a code change. Changes still queued on a phone that has not synced are not in PostgreSQL yet, by design.
 
 Those are the abstract costs. The honest physical costs:
 

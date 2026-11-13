@@ -1,4 +1,4 @@
-import type { ChangesResponse, ConflictLogEntry, Role, Session, SyncResponse, User } from '@washlog/shared';
+import type { Catalog, ChangesResponse, ConflictLogEntry, Role, Session, SyncResponse, User } from '@washlog/shared';
 import { db, getMeta, setMeta } from './db';
 import type { Transport } from './sync';
 
@@ -61,6 +61,7 @@ export const httpTransport: Transport = {
   sendOp: (op) => request<SyncResponse>('/api/sync/ops', post(op)),
   fetchChanges: (since) => request<ChangesResponse>(`/api/sync/changes?since=${since}`),
   fetchConflicts: async () => (await request<{ conflicts: ConflictLogEntry[] }>('/api/conflicts')).conflicts,
+  fetchCatalog: () => request<Catalog>('/api/catalog'),
 };
 
 // ---- Login ----

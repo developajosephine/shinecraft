@@ -1,6 +1,8 @@
 import {
   authorizeOp,
+  mergeCatalog,
   resolveLww,
+  type Catalog,
   type ConflictInfo,
   type FieldStamps,
   type ConflictLogEntry,
@@ -271,6 +273,20 @@ export async function changesSince(pool: Pool, since: number): Promise<{ records
 export async function allRecords(pool: Pool): Promise<WashRecord[]> {
   const res = await pool.query<RecordRow>('SELECT * FROM records ORDER BY change_seq');
   return res.rows.map(rowToRecord);
+}
+
+/** Reference data from the lookup tables (migration 004), merged over the built-in defaults. */
+export async function readCatalog(pool: Pool): Promise<Catalog> {
+  const [vehicles, services, units] = await Promise.all([
+    pool.query('SELECT code, label, default_water_litres FROM vehicle_types ORDER BY sort_order, code'),
+    pool.query('SELECT code, label, default_price_kes FROM services ORDER BY sort_order, code'),
+    pool.query('SELECT code, label FROM supply_units ORDER BY sort_order, code'),
+  ]);
+  return mergeCatalog({
+    vehicleTypes: vehicles.rows.map((r) => ({ code: r.code, label: r.label, defaultWaterLitres: Number(r.default_water_litres) })),
+    services: services.rows.map((r) => ({ code: r.code, label: r.label, defaultPriceKes: r.default_price_kes })),
+    supplyUnits: units.rows.map((r) => ({ code: r.code, label: r.label })),
+  });
 }
 
 export async function recentConflicts(pool: Pool, limit = 200): Promise<ConflictLogEntry[]> {

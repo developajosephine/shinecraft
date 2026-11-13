@@ -1,4 +1,4 @@
-import type { ChangesResponse, ConflictLogEntry, Op, SyncResponse } from '@washlog/shared';
+import { mergeCatalog, type Catalog, type ChangesResponse, type ConflictLogEntry, type Op, type SyncResponse } from '@washlog/shared';
 import { getMeta, setMeta, type LocalRecord, type WashLogDB } from './db';
 
 /** How the sync loop talks to the server. Throws on network error, non-2xx or timeout. */
@@ -6,6 +6,8 @@ export interface Transport {
   sendOp(op: Op): Promise<SyncResponse>;
   fetchChanges(since: number): Promise<ChangesResponse>;
   fetchConflicts(): Promise<ConflictLogEntry[]>;
+  /** Reference data (vehicle types, services, units). Optional: without it the built-in values are used. */
+  fetchCatalog?(): Promise<Catalog>;
 }
 
 export interface PushResult {
@@ -111,6 +113,19 @@ export async function refreshConflicts(db: WashLogDB, transport: Transport): Pro
   });
 }
 
+/**
+ * Keep the server's reference data on the phone for offline use. A failure here never fails the
+ * sync: the phone keeps the copy it has, or the built-in values.
+ */
+export async function refreshCatalog(db: WashLogDB, transport: Transport): Promise<void> {
+  if (!transport.fetchCatalog) return;
+  try {
+    await setMeta(db, 'catalog', mergeCatalog(await transport.fetchCatalog()));
+  } catch {
+    /* keep the stored or built-in catalog */
+  }
+}
+
 export interface SyncResult {
   ok: boolean;
   sent: number;
@@ -139,6 +154,7 @@ async function runSync(db: WashLogDB, transport: Transport): Promise<SyncResult>
   try {
     await pullChanges(db, transport);
     await refreshConflicts(db, transport);
+    await refreshCatalog(db, transport);
   } catch (err) {
     await setMeta(db, 'lastError', message(err));
     return { ok: false, sent: push.sent, refused: push.refused, error: message(err) };

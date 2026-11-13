@@ -20,7 +20,7 @@ import {
 import { CLIENT_DIST } from './config';
 import type { Pool } from './db';
 import { Counter, rateLimit, tooMany } from './rateLimit';
-import { allRecords, changesSince, handleOp, recentConflicts } from './syncService';
+import { allRecords, changesSince, handleOp, readCatalog, recentConflicts } from './syncService';
 
 export interface Limits {
   /** Requests per minute, per IP, across the whole API. */
@@ -237,6 +237,11 @@ export function createApp(opts: AppOptions) {
 
   app.get('/api/records', requireAuth, async (_req, res) => {
     res.json({ records: await allRecords(pool) });
+  });
+
+  /** Vehicle types, services (default prices) and supply units, from the lookup tables. */
+  app.get('/api/catalog', requireAuth, async (_req, res) => {
+    res.json(await readCatalog(pool));
   });
 
   // ---- Manager: users and activity ----

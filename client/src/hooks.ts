@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
-import type { Role, Session } from '@washlog/shared';
+import { DEFAULT_CATALOG, mergeCatalog, type Catalog, type Role, type Session } from '@washlog/shared';
 import { db } from './db';
 
 /** The logged-in user's role. Least privilege until it has loaded. */
@@ -8,6 +8,10 @@ export function useRole(): Role {
   return useLiveQuery(async () => ((await db.meta.get('session'))?.value as Session | undefined)?.user.role ?? 'attendant', [], 'attendant' as Role);
 }
 
+/** Vehicle types, services and units as last fetched from the server; built-in values until then (or offline). */
+export function useCatalog(): Catalog {
+  return useLiveQuery(async () => mergeCatalog((await db.meta.get('catalog'))?.value), [], DEFAULT_CATALOG);
+}
 
 /** navigator.onLine is only a hint: it says "has a network", not "can reach the server". */
 export function useOnline(): boolean {

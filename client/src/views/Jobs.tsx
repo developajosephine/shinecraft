@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { JOB_STATUSES, can, type JobRecord, type JobStatus } from '@washlog/shared';
 import { db } from '../db';
-import { isToday, useRole } from '../hooks';
+import { isToday, useCatalog, useRole } from '../hooks';
 import { NEXT_STEP, STATUS_LABEL, VEHICLE_LABEL, cap } from '../labels';
 import { updateRecord } from '../store';
 import { toast } from '../toast';
@@ -64,6 +64,9 @@ export function Jobs({ onChanged }: { onChanged: () => void }) {
   const [filter, setFilter] = useState<'all' | JobStatus>('all');
   const [paying, setPaying] = useState<LocalJob | null>(null);
   const canPay = can(useRole(), 'takePayment');
+  const catalog = useCatalog();
+  const serviceLabel = (code: string) => catalog.services.find((e) => e.code === code)?.label ?? `${cap(code)} wash`;
+  const vehicleLabel = (code: string) => catalog.vehicleTypes.find((e) => e.code === code)?.label ?? VEHICLE_LABEL[code as keyof typeof VEHICLE_LABEL];
 
   const jobs = useLiveQuery(
     async () => (await db.records.where('type').equals('job').toArray()).filter((r) => !r.deleted) as LocalJob[],
@@ -162,7 +165,7 @@ export function Jobs({ onChanged }: { onChanged: () => void }) {
                     <span className="price">KES {job.priceKes.toLocaleString()}</span>
                   </div>
                   <div className="muted">
-                    {cap(job.service)} wash · {VEHICLE_LABEL[job.vehicleType]} · {job.attendant}
+                    {serviceLabel(job.service)} · {vehicleLabel(job.vehicleType)} · {job.attendant}
                   </div>
                   <div className="job-tags">
                     <StatusChip status={job.status} />
