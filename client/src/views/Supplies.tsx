@@ -1,7 +1,8 @@
 import { useState, type FormEvent } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
-import { SUPPLY_UNITS, type SupplyRecord, type SupplyUnit } from '@washlog/shared';
+import { SUPPLY_UNITS, can, type SupplyRecord, type SupplyUnit } from '@washlog/shared';
 import { db } from '../db';
+import { useRole } from '../hooks';
 import { UNIT_LABEL, UNIT_STEP, cap, fieldErrors } from '../labels';
 import { createRecord, deleteRecord, updateRecord } from '../store';
 import { toast } from '../toast';
@@ -81,6 +82,7 @@ export function Supplies({ onChanged }: { onChanged: () => void }) {
   );
   const [adding, setAdding] = useState(false);
   const [removing, setRemoving] = useState<LocalSupply | null>(null);
+  const canDelete = can(useRole(), 'deleteRecords');
 
   const change = async (s: LocalSupply, by: number) => {
     const max = s.unit === 'pct' ? 100 : Infinity;
@@ -123,9 +125,11 @@ export function Supplies({ onChanged }: { onChanged: () => void }) {
                       <SyncBadge record={s} conflicted={conflicted.has(s.id)} />
                     </div>
                   </div>
-                  <button className="icon-btn" onClick={() => setRemoving(s)} aria-label={`Remove ${s.item}`}>
-                    <Icon name="trash" size={18} />
-                  </button>
+                  {canDelete && (
+                    <button className="icon-btn" onClick={() => setRemoving(s)} aria-label={`Remove ${s.item}`}>
+                      <Icon name="trash" size={18} />
+                    </button>
+                  )}
                 </div>
                 {s.unit === 'pct' && (
                   <div className="level" aria-hidden="true">

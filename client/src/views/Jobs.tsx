@@ -1,8 +1,8 @@
 import { useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
-import { JOB_STATUSES, type JobRecord, type JobStatus } from '@washlog/shared';
+import { JOB_STATUSES, can, type JobRecord, type JobStatus } from '@washlog/shared';
 import { db } from '../db';
-import { isToday } from '../hooks';
+import { isToday, useRole } from '../hooks';
 import { NEXT_STEP, STATUS_LABEL, VEHICLE_LABEL, cap } from '../labels';
 import { updateRecord } from '../store';
 import { toast } from '../toast';
@@ -63,6 +63,7 @@ export function Jobs({ onChanged }: { onChanged: () => void }) {
   const [scope, setScope] = useState<'today' | 'all'>('today');
   const [filter, setFilter] = useState<'all' | JobStatus>('all');
   const [paying, setPaying] = useState<LocalJob | null>(null);
+  const canPay = can(useRole(), 'takePayment');
 
   const jobs = useLiveQuery(
     async () => (await db.records.where('type').equals('job').toArray()).filter((r) => !r.deleted) as LocalJob[],
@@ -150,7 +151,9 @@ export function Jobs({ onChanged }: { onChanged: () => void }) {
       ) : (
         <ul className="list">
           {list.map((job) => {
-            const step = NEXT_STEP[job.status];
+            const next = NEXT_STEP[job.status];
+            // Taking payment is for the cashier or manager.
+            const step = next?.next === 'paid' && !canPay ? null : next;
             return (
               <li key={job.id} className={`job st-${job.status}`}>
                 <a href={`#/job/${job.id}`} className="job-main" aria-label={`Edit ${job.plate}`}>
@@ -166,6 +169,7 @@ export function Jobs({ onChanged }: { onChanged: () => void }) {
                     <SyncBadge record={job} conflicted={conflicted.has(job.id)} />
                   </div>
                 </a>
+                {!step && next && <span className="job-next muted-note">Cashier takes payment</span>}
                 {step && (
                   <button className="job-next" onClick={() => advance(job)}>
                     {step.label}

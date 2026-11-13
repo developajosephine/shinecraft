@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
-import { JOB_STATUSES, SERVICES, VEHICLE_TYPES, type JobRecord, type JobStatus, type Service, type VehicleType } from '@washlog/shared';
+import { JOB_STATUSES, SERVICES, VEHICLE_TYPES, can, type JobRecord, type JobStatus, type Service, type VehicleType } from '@washlog/shared';
 import { db } from '../db';
-import { go } from '../hooks';
+import { go, useRole } from '../hooks';
 import { PRICE_PRESETS, SERVICE_PRICE, STATUS_LABEL, VEHICLE_LABEL, VEHICLE_WATER, cap, fieldErrors } from '../labels';
 import { createRecord, deleteRecord, updateRecord } from '../store';
 import { toast } from '../toast';
@@ -141,6 +141,10 @@ export function JobForm({ id, deviceName, onChanged }: Props) {
     go('jobs');
   };
 
+  const role = useRole();
+  const canPay = can(role, 'takePayment');
+  const canPrice = !existing || can(role, 'changePrice');
+  const canReassign = can(role, 'reassignJob');
   const status = existing ? existing.status : newStatus;
   const statusIndex = JOB_STATUSES.indexOf(status);
   const err = (field: string) => errors[field] || '';
@@ -152,7 +156,7 @@ export function JobForm({ id, deviceName, onChanged }: Props) {
           <Icon name="back" size={22} />
         </a>
         <h1>{existing ? `Edit ${existing.plate}` : 'Add car'}</h1>
-        {existing && (
+        {existing && can(role, 'deleteRecords') && (
           <button className="icon-btn danger" onClick={() => setConfirmDelete(true)} aria-label={`Delete ${existing.plate}`}>
             <Icon name="trash" size={20} />
           </button>
@@ -166,7 +170,7 @@ export function JobForm({ id, deviceName, onChanged }: Props) {
             <ol className="steps">
               {JOB_STATUSES.map((s, i) => (
                 <li key={s} className={i < statusIndex ? 'past' : i === statusIndex ? 'current' : ''}>
-                  <button type="button" onClick={() => pickStatus(s)} aria-current={i === statusIndex ? 'step' : undefined}>
+                  <button type="button" onClick={() => pickStatus(s)} disabled={s === 'paid' && !canPay} aria-current={i === statusIndex ? 'step' : undefined}>
                     <span className="step-dot">{i < statusIndex ? <Icon name="check" size={14} /> : i + 1}</span>
                     {STATUS_LABEL[s]}
                   </button>
@@ -219,6 +223,7 @@ export function JobForm({ id, deviceName, onChanged }: Props) {
                   set('priceKes', e.target.value);
                 }}
                 inputMode="numeric"
+                disabled={!canPrice}
               />
             </div>
             <div className="presets" role="group" aria-label="Quick prices">
@@ -227,6 +232,7 @@ export function JobForm({ id, deviceName, onChanged }: Props) {
                   type="button"
                   key={p}
                   className={`preset ${Number(form.priceKes) === p ? 'on' : ''}`}
+                  disabled={!canPrice}
                   onClick={() => {
                     touched.current.price = true;
                     set('priceKes', String(p));
@@ -264,7 +270,8 @@ export function JobForm({ id, deviceName, onChanged }: Props) {
             {err('waterLitres') && <p className="field-error">{err('waterLitres')}</p>}
           </div>
 
-          <Tiles
+          {!canPay && <p className="hint">Payment is recorded by the cashier or manager.</p>}
+          {canPay && <Tiles
             label="Payment"
             columns={3}
             value={form.paymentMethod}
@@ -274,9 +281,9 @@ export function JobForm({ id, deviceName, onChanged }: Props) {
               { value: 'cash', label: 'Cash' },
               { value: 'mpesa', label: 'M-Pesa' },
             ]}
-          />
+          />}
 
-          {form.paymentMethod === 'mpesa' && (
+          {canPay && form.paymentMethod === 'mpesa' && (
             <div className={`field ${err('mpesaCode') ? 'invalid' : ''}`}>
               <label htmlFor="f-mpesaCode">M-Pesa code (optional)</label>
               <input
@@ -293,7 +300,7 @@ export function JobForm({ id, deviceName, onChanged }: Props) {
 
           <div className={`field ${err('attendant') ? 'invalid' : ''}`}>
             <label htmlFor="f-attendant">Attendant</label>
-            <input id="f-attendant" value={form.attendant} onChange={(e) => set('attendant', e.target.value)} maxLength={60} />
+            <input id="f-attendant" value={form.attendant} onChange={(e) => set('attendant', e.target.value)} maxLength={60} disabled={!canReassign} />
             {err('attendant') && <p className="field-error">{err('attendant')}</p>}
           </div>
 

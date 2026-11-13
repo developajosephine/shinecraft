@@ -40,6 +40,36 @@ export function Conflicts({ deviceId, onRefresh }: { deviceId: string; onRefresh
           {sorted.map((c) => {
             const money = c.policy === 'lww-flag-money';
             const tombstone = c.policy === 'tombstone';
+            if (c.policy === 'forbidden') {
+              const tried =
+                c.rejectedValue && typeof c.rejectedValue === 'object'
+                  ? Object.entries(c.rejectedValue as Record<string, unknown>)
+                      .map(([k, v]) => `${FIELD_LABEL[k] ?? k}: ${formatValue(k, v)}`)
+                      .join(', ')
+                  : 'Delete';
+              return (
+                <li key={c.id} className="conflict-card money">
+                  <div className="conflict-head">
+                    <div>
+                      <span className="plate">{names.get(c.recordId) ?? `Record ${shortId(c.recordId)}`}</span>
+                      <span className="conflict-field">Change refused</span>
+                    </div>
+                    <span className="chip st-money">Not allowed</span>
+                  </div>
+                  <div className="versus">
+                    <div className="kept">
+                      <span className="versus-label">Why</span>
+                      <b>{String(c.winningValue)}</b>
+                    </div>
+                    <div className="rejected">
+                      <span className="versus-label">Refused · {device(c.rejectedDevice)}</span>
+                      <s>{tried}</s>
+                    </div>
+                  </div>
+                  <div className="muted small">{formatTime(c.createdAt)}</div>
+                </li>
+              );
+            }
             return (
               <li key={c.id} className={`conflict-card ${money ? 'money' : ''}`}>
                 <div className="conflict-head">

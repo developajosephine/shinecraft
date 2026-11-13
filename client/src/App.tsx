@@ -1,16 +1,20 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
-import { httpTransport } from './api';
+import { can, type Session } from '@washlog/shared';
+import { httpTransport, logout } from './api';
 import { db } from './db';
 import { useHashRoute, useOnline } from './hooks';
 import { syncOnce } from './sync';
 import { toast } from './toast';
-import { Icon, Toasts, type IconName } from './ui';
+import { ROLE_LABEL } from './labels';
+import { clearSession, ensureDeviceId } from './store';
+import { Icon, Sheet, Toasts, type IconName } from './ui';
+import { Activity, Users } from './views/Admin';
 import { Conflicts } from './views/Conflicts';
 import { Debug } from './views/Debug';
 import { JobForm } from './views/JobForm';
 import { Jobs } from './views/Jobs';
-import { Setup } from './views/Setup';
+import { Login } from './views/Setup';
 import { Supplies } from './views/Supplies';
 import { SyncPanel } from './views/SyncPanel';
 
@@ -24,11 +28,17 @@ const TABS: { key: string; label: string; icon: IconName }[] = [
 export type LinkState = 'on' | 'warn' | 'off';
 
 export default function App() {
-  // undefined = still loading, null = first run
-  const device = useLiveQuery(async () => {
-    const [id, name] = await db.meta.bulkGet(['deviceId', 'deviceName']);
-    return id && name ? { deviceId: id.value as string, deviceName: name.value as string } : null;
+  // undefined = still loading. The login is read from the phone, so the app opens with no signal.
+  // (Live queries may only read, so the device ID is created in an effect.)
+  useEffect(() => {
+    void ensureDeviceId(db);
+  }, []);
+  const auth = useLiveQuery(async () => {
+    const [deviceId, session, expired] = await db.meta.bulkGet(['deviceId', 'session', 'sessionExpired']);
+    if (!deviceId) return undefined;
+    return { deviceId: deviceId.value as string, session: (session?.value as Session | undefined) ?? null, expired: expired?.value === true };
   });
+  const [account, setAccount] = useState(false);
   const pendingCount = useLiveQuery(() => db.opQueue.count(), [], 0);
   const lastError = useLiveQuery(async () => ((await db.meta.get('lastError'))?.value as string | null) ?? null, [], null);
   const online = useOnline();
@@ -38,13 +48,17 @@ export default function App() {
   const runSync = useCallback(async () => {
     setSyncing(true);
     try {
-      return await syncOnce(db, httpTransport);
+      const result = await syncOnce(db, httpTransport);
+      if (result.refused) {
+        toast(`${result.refused} ${result.refused === 1 ? 'change was' : 'changes were'} not allowed. See Conflicts.`, 'bad');
+      }
+      return result;
     } finally {
       setSyncing(false);
     }
   }, []);
 
-  const ready = Boolean(device);
+  const ready = Boolean(auth?.session) && !auth?.expired;
   useEffect(() => {
     if (!ready) return;
     void runSync(); // app start
@@ -67,12 +81,30 @@ export default function App() {
   /** "Sync now" pressed by a person: tell them what happened. */
   const manualSync = useCallback(async () => {
     const result = await runSync();
+    if (result.refused) return; // already explained
     if (!result.ok) toast('Sync failed. Your changes are still saved on this phone.', 'bad');
     else toast(result.sent > 0 ? `Synced ${result.sent} ${result.sent === 1 ? 'change' : 'changes'}` : 'Everything is up to date');
   }, [runSync]);
 
-  if (device === undefined) return null;
-  if (device === null) return <Setup />;
+  if (auth === undefined) return null;
+  if (!auth.session || auth.expired) {
+    return (
+      <>
+        <Login expired={auth.expired} pending={pendingCount} />
+        <Toasts />
+      </>
+    );
+  }
+  const user = auth.session.user;
+  const device = { deviceId: auth.deviceId, deviceName: user.name };
+  const isManager = can(user.role, 'manageUsers');
+
+  const logOut = async () => {
+    setAccount(false);
+    await logout().catch(() => {}); // offline: the server session simply expires later
+    await clearSession(db);
+    window.location.hash = '#/jobs';
+  };
 
   // navigator.onLine only says "has a network"; a failed sync says the server was not reachable.
   const link: LinkState = !online ? 'off' : lastError ? 'warn' : 'on';
@@ -94,6 +126,8 @@ export default function App() {
   else if (tab === 'sync') view = <SyncPanel link={link} syncing={syncing} onSync={manualSync} />;
   else if (tab === 'conflicts') view = <Conflicts deviceId={device.deviceId} onRefresh={manualSync} />;
   else if (tab === 'debug') view = <Debug online={online} />;
+  else if (tab === 'users' && isManager) view = <Users myId={user.id} />;
+  else if (tab === 'activity' && isManager) view = <Activity />;
   else view = <Jobs onChanged={changed} />;
 
   return (
@@ -105,7 +139,9 @@ export default function App() {
           </span>
           WashLog
         </span>
-        <span className="device">{device.deviceName}</span>
+        <button className="device account-btn" onClick={() => setAccount(true)} aria-label={`Account: ${user.name}, ${ROLE_LABEL[user.role]}`}>
+          {user.name} · {ROLE_LABEL[user.role]}
+        </button>
         <a className={`pill ${link}`} href="#/sync" aria-label={`Connection: ${linkLabel}. Open sync.`}>
           <span className="dot" />
           {linkLabel}
@@ -125,7 +161,7 @@ export default function App() {
       <main>{view}</main>
       <nav className="tabs" aria-label="Main">
         {TABS.map((t) => {
-          const active = tab === t.key || (t.key === 'sync' && tab === 'debug');
+          const active = tab === t.key || (t.key === 'sync' && ['debug', 'users', 'activity'].includes(tab));
           return (
             <a key={t.key} href={`#/${t.key}`} className={active ? 'active' : ''} aria-current={active ? 'page' : undefined}>
               <span className="tab-icon">
@@ -137,6 +173,29 @@ export default function App() {
           );
         })}
       </nav>
+      {account && (
+        <Sheet title={user.name} onClose={() => setAccount(false)}>
+          <p className="muted">
+            Logged in as {ROLE_LABEL[user.role].toLowerCase()} on this phone.
+            {pendingCount > 0 && ` ${pendingCount} unsynced ${pendingCount === 1 ? 'change stays' : 'changes stay'} on this phone and will be sent after the next login.`}
+          </p>
+          <div className="pay-options">
+            {isManager && (
+              <>
+                <a className="link-row" href="#/users" onClick={() => setAccount(false)}>
+                  Users <Icon name="chevron" size={18} />
+                </a>
+                <a className="link-row" href="#/activity" onClick={() => setAccount(false)}>
+                  Activity log <Icon name="chevron" size={18} />
+                </a>
+              </>
+            )}
+            <button className="btn big" onClick={logOut}>
+              Log out
+            </button>
+          </div>
+        </Sheet>
+      )}
       <Toasts />
     </div>
   );

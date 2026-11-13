@@ -1,4 +1,13 @@
 import { useEffect, useState } from 'react';
+import { useLiveQuery } from 'dexie-react-hooks';
+import type { Role, Session } from '@washlog/shared';
+import { db } from './db';
+
+/** The logged-in user's role. Least privilege until it has loaded. */
+export function useRole(): Role {
+  return useLiveQuery(async () => ((await db.meta.get('session'))?.value as Session | undefined)?.user.role ?? 'attendant', [], 'attendant' as Role);
+}
+
 
 /** navigator.onLine is only a hint: it says "has a network", not "can reach the server". */
 export function useOnline(): boolean {

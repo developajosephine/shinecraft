@@ -1,6 +1,6 @@
 WashLog test results
-Generated: 2026-11-12T13:50:42.826Z
-Commit:    5c78ec8
+Generated: 2026-11-13T13:42:28.196Z
+Commit:    ce3bf77
 Node:      v24.14.0
 Command:   npm test
 Exit code: 0
@@ -16,20 +16,26 @@ Exit code: 0
 
  RUN  v5.1.0 /Users/felixtwoli/Development/shinecraft/shared
 
+ ✓ src/auth.test.ts > authorizeOp > attendants can add jobs and move them up to done 1ms
+ ✓ src/auth.test.ts > authorizeOp > attendants cannot touch money, reassign, reopen paid jobs or delete 1ms
+ ✓ src/auth.test.ts > authorizeOp > cashiers can take payment and change prices but not delete 0ms
+ ✓ src/auth.test.ts > authorizeOp > managers can do everything; anyone can edit supplies but only managers remove them 0ms
+ ✓ src/auth.test.ts > authorizeOp > capabilities follow the role table 0ms
+ ✓ src/auth.test.ts > auth schemas > accepts a 4–8 digit PIN and rejects anything else 1ms
  ✓ src/conflict.test.ts > resolveLww > later timestamp wins (incoming later) 2ms
  ✓ src/conflict.test.ts > resolveLww > later timestamp wins (server later) 0ms
  ✓ src/conflict.test.ts > resolveLww > equal timestamps: greater deviceId wins, regardless of argument order 0ms
  ✓ src/conflict.test.ts > resolveLww > returns per-field winning and rejected values, flagging money fields 0ms
  ✓ src/conflict.test.ts > resolveLww > decides each field against the stamp of whoever last wrote THAT field 0ms
  ✓ src/conflict.test.ts > resolveLww > a device never conflicts with its own earlier write 0ms
- ✓ src/conflict.test.ts > parseOp > normalises plates 3ms
+ ✓ src/conflict.test.ts > parseOp > normalises plates 2ms
  ✓ src/conflict.test.ts > parseOp > rejects unknown fields, bad enums and negative prices with reasons 1ms
  ✓ src/conflict.test.ts > parseOp > requires every field on create 1ms
 
- Test Files  1 passed (1)
-      Tests  9 passed (9)
-   Start at  16:50:40
-   Duration  162ms (import 76%, tests 11%, transform 10%, worker 3%)
+ Test Files  2 passed (2)
+      Tests  15 passed (15)
+   Start at  16:42:24
+   Duration  190ms (import 77%, transform 12%, tests 8%, worker 3%)
 
 
 > @washlog/client@1.0.0 test
@@ -38,22 +44,26 @@ Exit code: 0
 
  RUN  v5.1.0 /Users/felixtwoli/Development/shinecraft/client
 
- ✓ tests/sync.test.ts > sync loop > a failed send leaves the head op in place with the same opId; later ops are not sent 21ms
- ✓ tests/sync.test.ts > sync loop > records the error and skips the pull when the push fails 9ms
- ✓ tests/sync.test.ts > sync loop > an op already in ackedOps is skipped and removed, not resent 4ms
- ✓ tests/sync.test.ts > sync loop > clears pending only when no ops for that record remain 5ms
- ✓ tests/sync.test.ts > sync loop > pulled changes do not overwrite records with pending ops 7ms
- ✓ tests/queue.test.ts > operation queue > preserves FIFO order across 3+ ops and dequeues each op only after its ack 25ms
- ✓ tests/queue.test.ts > operation queue > record update + enqueue are atomic: a failure inside the transaction writes neither 11ms
+ ✓ tests/roles.test.ts > roles on the phone > an attendant cannot queue a payment or a delete; nothing is queued 17ms
+ ✓ tests/roles.test.ts > roles on the phone > a cashier can take payment 4ms
+ ✓ tests/roles.test.ts > roles on the phone > a create the server refuses leaves the queue and the local copy is removed; the queue keeps moving 8ms
+ ✓ tests/roles.test.ts > roles on the phone > a 401 is a failed send: the op stays queued for after the next login 2ms
+ ✓ tests/queue.test.ts > operation queue > preserves FIFO order across 3+ ops and dequeues each op only after its ack 21ms
+ ✓ tests/queue.test.ts > operation queue > record update + enqueue are atomic: a failure inside the transaction writes neither 12ms
  ✓ tests/queue.test.ts > operation queue > keeps multiple ops for the same record as separate queue entries, in order 5ms
  ✓ tests/queue.test.ts > operation queue > does not queue an op when an edit changes nothing 2ms
  ✓ tests/queue.test.ts > operation queue > rejects invalid data before anything is written 2ms
- ✓ tests/queue.test.ts > operation queue > data persists across closing and reopening the database (reload) 7ms
+ ✓ tests/queue.test.ts > operation queue > data persists across closing and reopening the database (reload) 5ms
+ ✓ tests/sync.test.ts > sync loop > a failed send leaves the head op in place with the same opId; later ops are not sent 25ms
+ ✓ tests/sync.test.ts > sync loop > records the error and skips the pull when the push fails 7ms
+ ✓ tests/sync.test.ts > sync loop > an op already in ackedOps is skipped and removed, not resent 5ms
+ ✓ tests/sync.test.ts > sync loop > clears pending only when no ops for that record remain 4ms
+ ✓ tests/sync.test.ts > sync loop > pulled changes do not overwrite records with pending ops 6ms
 
- Test Files  2 passed (2)
-      Tests  11 passed (11)
-   Start at  16:50:40
-   Duration  296ms (import 30%, tests 29%, setup 28%, transform 10%, worker 3%)
+ Test Files  3 passed (3)
+      Tests  15 passed (15)
+   Start at  16:42:25
+   Duration  222ms (import 36%, tests 33%, setup 19%, transform 10%, worker 2%)
 
 
 > @washlog/server@1.0.0 test
@@ -62,35 +72,55 @@ Exit code: 0
 
  RUN  v5.1.0 /Users/felixtwoli/Development/shinecraft/server
 
- ✓ tests/conflict.test.ts > conflict resolution > two devices update the same record from the same baseVersion -> second is conflict_resolved, later timestamp wins, conflict_log written 48ms
- ✓ tests/conflict.test.ts > conflict resolution > a stale update with an EARLIER timestamp loses: server value kept, version unchanged, rejection logged 24ms
- ✓ tests/conflict.test.ts > conflict resolution > equal timestamps: the lexicographically greater deviceId wins, whichever arrives first 40ms
- ✓ tests/conflict.test.ts > conflict resolution > logs one row per differing field and skips fields both sides agree on 21ms
- ✓ tests/conflict.test.ts > conflict resolution > edits to different fields both survive, whichever phone syncs first 39ms
- ✓ tests/conflict.test.ts > conflict resolution > a device's own queued ops chain without conflict (stale baseVersion, same device) 20ms
- ✓ tests/conflict.test.ts > deletion policy > delete then stale update -> rejected, record stays deleted, rejection logged 18ms
- ✓ tests/conflict.test.ts > deletion policy > a re-sent create cannot resurrect a tombstoned record 20ms
- ✓ tests/conflict.test.ts > deletion policy > delete wins from a stale baseVersion, and deleting twice is harmless 25ms
- ✓ tests/conflict.test.ts > deletion policy > GET /api/conflicts returns the log, newest first 5ms
- ✓ tests/sync.test.ts > POST /api/sync/ops — apply and dedup > create -> 200 applied, version 1 28ms
- ✓ tests/sync.test.ts > POST /api/sync/ops — apply and dedup > same op sent twice -> second is duplicate, exactly one row, version unchanged 28ms
- ✓ tests/sync.test.ts > POST /api/sync/ops — apply and dedup > a duplicated update is not applied twice 27ms
- ✓ tests/sync.test.ts > POST /api/sync/ops — apply and dedup > concurrent retries of the same op apply it exactly once 21ms
- ✓ tests/sync.test.ts > POST /api/sync/ops — apply and dedup > lost ack: drop-ack-next answers 503 but commits; retry with the same opId -> duplicate, no duplicate job 20ms
- ✓ tests/sync.test.ts > POST /api/sync/ops — apply and dedup > fail-next -> 503 and nothing applied; retry -> applied 12ms
- ✓ tests/sync.test.ts > POST /api/sync/ops — apply and dedup > invalid op -> 400 with reasons, nothing written, opId not recorded 27ms
- ✓ tests/sync.test.ts > POST /api/sync/ops — apply and dedup > rejects bodies over 100kb and malformed JSON without writing 9ms
- ✓ tests/api.test.ts > auth > missing or wrong token -> 401 on every protected route, and nothing is written 29ms
- ✓ tests/api.test.ts > GET /healthz > -> 200 with db ok and the revision, no token needed 3ms
- ✓ tests/api.test.ts > GET /healthz > -> 503 when the database is unreachable 4ms
- ✓ tests/api.test.ts > GET /api/sync/changes > returns only changes newer than `since`, including tombstones 56ms
- ✓ tests/api.test.ts > GET /api/sync/changes > rejects a malformed since 3ms
- ✓ tests/api.test.ts > GET /api/records > lists all current records 3ms
- ✓ tests/api.test.ts > demo toggles and migrations > demo endpoints return 404 when DEMO_MODE is off 3ms
+ ✓ tests/security.test.ts > login and sessions > right name + PIN -> a session token; the PIN and token are stored only as hashes 36ms
+ ✓ tests/security.test.ts > login and sessions > wrong PIN and unknown name get the same 401 69ms
+ ✓ tests/security.test.ts > login and sessions > a session token works on the API; logout ends it 41ms
+ ✓ tests/security.test.ts > login and sessions > an expired session is refused 35ms
+ ✓ tests/security.test.ts > login and sessions > the service token is no longer handed out to browsers 1ms
+ ✓ tests/security.test.ts > roles on sync operations > an attendant can create a job, and it is always recorded in their own name 12ms
+ ✓ tests/security.test.ts > roles on sync operations > an attendant cannot take payment, change the price or delete: rejected, logged, record untouched 31ms
+ ✓ tests/security.test.ts > roles on sync operations > an attendant can still move a job through washing and done 13ms
+ ✓ tests/security.test.ts > roles on sync operations > a refused op is still exactly-once: the retry gets the same answer 21ms
+ ✓ tests/security.test.ts > roles on sync operations > a cashier can take payment but cannot delete; a manager can delete 24ms
+ ✓ tests/security.test.ts > roles on sync operations > a session only works for the device it was opened on 8ms
+ ✓ tests/security.test.ts > manager-only endpoints > attendants and cashiers get 403 on users, audit and demo toggles 11ms
+ ✓ tests/security.test.ts > manager-only endpoints > a manager can add a user, and never sees PIN hashes 105ms
+ ✓ tests/security.test.ts > manager-only endpoints > deactivating a user ends their sessions at once 103ms
+ ✓ tests/security.test.ts > manager-only endpoints > the last active manager cannot be demoted or deactivated 5ms
+ ✓ tests/security.test.ts > manager-only endpoints > the audit log records who did what, including refused ops and failed logins 3ms
+ ✓ tests/security.test.ts > rate limits and headers > a name is locked after repeated wrong PINs, even for the right PIN 105ms
+ ✓ tests/security.test.ts > rate limits and headers > too many requests from one address -> 429 with Retry-After 10ms
+ ✓ tests/security.test.ts > rate limits and headers > every response carries the security headers; HSTS only when enabled 6ms
+ ✓ tests/security.test.ts > rate limits and headers > login options list demo accounts only in demo mode 2ms
+ ✓ tests/conflict.test.ts > conflict resolution > two devices update the same record from the same baseVersion -> second is conflict_resolved, later timestamp wins, conflict_log written 40ms
+ ✓ tests/conflict.test.ts > conflict resolution > a stale update with an EARLIER timestamp loses: server value kept, version unchanged, rejection logged 18ms
+ ✓ tests/conflict.test.ts > conflict resolution > equal timestamps: the lexicographically greater deviceId wins, whichever arrives first 39ms
+ ✓ tests/conflict.test.ts > conflict resolution > logs one row per differing field and skips fields both sides agree on 18ms
+ ✓ tests/conflict.test.ts > conflict resolution > edits to different fields both survive, whichever phone syncs first 32ms
+ ✓ tests/conflict.test.ts > conflict resolution > a device's own queued ops chain without conflict (stale baseVersion, same device) 18ms
+ ✓ tests/conflict.test.ts > deletion policy > delete then stale update -> rejected, record stays deleted, rejection logged 17ms
+ ✓ tests/conflict.test.ts > deletion policy > a re-sent create cannot resurrect a tombstoned record 16ms
+ ✓ tests/conflict.test.ts > deletion policy > delete wins from a stale baseVersion, and deleting twice is harmless 22ms
+ ✓ tests/conflict.test.ts > deletion policy > GET /api/conflicts returns the log, newest first 2ms
+ ✓ tests/sync.test.ts > POST /api/sync/ops — apply and dedup > create -> 200 applied, version 1 22ms
+ ✓ tests/sync.test.ts > POST /api/sync/ops — apply and dedup > same op sent twice -> second is duplicate, exactly one row, version unchanged 20ms
+ ✓ tests/sync.test.ts > POST /api/sync/ops — apply and dedup > a duplicated update is not applied twice 18ms
+ ✓ tests/sync.test.ts > POST /api/sync/ops — apply and dedup > concurrent retries of the same op apply it exactly once 20ms
+ ✓ tests/sync.test.ts > POST /api/sync/ops — apply and dedup > lost ack: drop-ack-next answers 503 but commits; retry with the same opId -> duplicate, no duplicate job 16ms
+ ✓ tests/sync.test.ts > POST /api/sync/ops — apply and dedup > fail-next -> 503 and nothing applied; retry -> applied 13ms
+ ✓ tests/sync.test.ts > POST /api/sync/ops — apply and dedup > invalid op -> 400 with reasons, nothing written, opId not recorded 14ms
+ ✓ tests/sync.test.ts > POST /api/sync/ops — apply and dedup > rejects bodies over 100kb and malformed JSON without writing 4ms
+ ✓ tests/api.test.ts > auth > missing or wrong token -> 401 on every protected route, and nothing is written 24ms
+ ✓ tests/api.test.ts > GET /healthz > -> 200 with db ok and the revision, no token needed 2ms
+ ✓ tests/api.test.ts > GET /healthz > -> 503 when the database is unreachable 3ms
+ ✓ tests/api.test.ts > GET /api/sync/changes > returns only changes newer than `since`, including tombstones 40ms
+ ✓ tests/api.test.ts > GET /api/sync/changes > rejects a malformed since 2ms
+ ✓ tests/api.test.ts > GET /api/records > lists all current records 2ms
+ ✓ tests/api.test.ts > demo toggles and migrations > demo endpoints return 404 when DEMO_MODE is off 2ms
  ✓ tests/api.test.ts > demo toggles and migrations > migrations are idempotent: running them again changes nothing and keeps data 4ms
 
- Test Files  3 passed (3)
-      Tests  26 passed (26)
-   Start at  16:50:41
-   Duration  1.46s (tests 66%, import 31%, transform 2%, worker 1%)
+ Test Files  4 passed (4)
+      Tests  46 passed (46)
+   Start at  16:42:25
+   Duration  2.32s (tests 76%, import 23%, transform 1%)
 

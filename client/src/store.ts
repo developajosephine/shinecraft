@@ -1,4 +1,4 @@
-import { parseFields, sameValue, type OpPayload, type RecordType } from '@washlog/shared';
+import { authorizeOp, parseFields, sameValue, type Op, type OpPayload, type RecordType, type Session } from '@washlog/shared';
 import { getMeta, type LocalRecord, type WashLogDB } from './db';
 
 export class ValidationError extends Error {
@@ -33,6 +33,46 @@ export async function setupDevice(db: WashLogDB, name: string): Promise<Device> 
   });
 }
 
+/** Every phone gets a permanent device ID the first time the app opens. */
+export async function ensureDeviceId(db: WashLogDB): Promise<string> {
+  return db.transaction('rw', db.meta, async () => {
+    const existing = await getMeta<string>(db, 'deviceId');
+    if (existing) return existing;
+    const deviceId = crypto.randomUUID();
+    await db.meta.put({ key: 'deviceId', value: deviceId });
+    return deviceId;
+  });
+}
+
+export async function getSession(db: WashLogDB): Promise<Session | null> {
+  return (await getMeta<Session>(db, 'session')) ?? null;
+}
+
+/** Kept on the phone so the app opens and works with no signal. */
+export async function saveSession(db: WashLogDB, session: Session): Promise<void> {
+  await db.meta.bulkPut([
+    { key: 'session', value: session },
+    { key: 'deviceName', value: session.user.name },
+    { key: 'sessionExpired', value: false },
+  ]);
+}
+
+/** Logging out forgets the login only. Records and the unsynced queue stay on the phone. */
+export async function clearSession(db: WashLogDB): Promise<void> {
+  await db.meta.bulkDelete(['session', 'sessionExpired']);
+}
+
+/**
+ * The same role rules the server enforces, checked before anything is queued, so a phone
+ * does not collect changes that are certain to be refused. No login (tests) = no check here.
+ */
+async function requireAllowed(db: WashLogDB, op: Pick<Op, 'type' | 'recordType' | 'payload'>, current?: unknown): Promise<void> {
+  const session = await getSession(db);
+  if (!session) return;
+  const reasons = authorizeOp(session.user.role, op, current as Record<string, unknown> | undefined);
+  if (reasons.length > 0) throw new ValidationError(reasons);
+}
+
 async function requireDeviceId(db: WashLogDB): Promise<string> {
   const deviceId = await getMeta<string>(db, 'deviceId');
   if (!deviceId) throw new Error('Device is not set up');
@@ -50,6 +90,7 @@ export async function createRecord(db: WashLogDB, type: RecordType, fields: unkn
   if (!parsed.success) throw new ValidationError(parsed.errors);
   const id = crypto.randomUUID();
   await db.transaction('rw', db.records, db.opQueue, db.meta, async () => {
+    await requireAllowed(db, { type: 'create', recordType: type, payload: parsed.data });
     const deviceId = await requireDeviceId(db);
     const now = new Date().toISOString();
     await db.records.put({
@@ -93,6 +134,7 @@ export async function updateRecord(db: WashLogDB, id: string, changes: unknown):
       if (!sameValue(current[field], value)) diff[field] = value;
     }
     if (Object.keys(diff).length === 0) return false;
+    await requireAllowed(db, { type: 'update', recordType: existing.type, payload: diff as OpPayload }, existing);
 
     const deviceId = await requireDeviceId(db);
     const now = new Date().toISOString();
@@ -116,6 +158,7 @@ export async function deleteRecord(db: WashLogDB, id: string): Promise<void> {
   await db.transaction('rw', db.records, db.opQueue, db.meta, async () => {
     const existing = await db.records.get(id);
     if (!existing || existing.deleted) return;
+    await requireAllowed(db, { type: 'delete', recordType: existing.type, payload: {} }, existing);
     const deviceId = await requireDeviceId(db);
     const now = new Date().toISOString();
     await db.records.put({

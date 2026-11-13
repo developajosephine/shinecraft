@@ -10,6 +10,8 @@ export interface Transport {
 
 export interface PushResult {
   sent: number;
+  /** Ops the server answered but refused (role rules). They leave the queue; see the conflict log. */
+  refused?: number;
   error?: string;
 }
 
@@ -27,6 +29,8 @@ async function applyAck(db: WashLogDB, op: Op, res: SyncResponse | null): Promis
     if (remaining === 0) {
       // No local edits left for this record: the server copy is the truth.
       if (res?.record) await db.records.put({ ...res.record, pending: false } as LocalRecord);
+      // A refused create never reached the server, so the local copy goes too.
+      else if (res?.status === 'rejected' && op.type === 'create') await db.records.delete(op.recordId);
       else await db.records.update(op.recordId, { pending: false });
     } else if (res?.record) {
       // Later local ops are still queued: keep the local fields, stay pending, track the version.
@@ -58,9 +62,10 @@ async function applyAck(db: WashLogDB, op: Op, res: SyncResponse | null): Promis
  */
 export async function pushQueue(db: WashLogDB, transport: Transport): Promise<PushResult> {
   let sent = 0;
+  let refused = 0;
   for (;;) {
     const head = await db.opQueue.orderBy('seq').first();
-    if (!head) return { sent };
+    if (!head) return refused ? { sent, refused } : { sent };
 
     // Already acknowledged (e.g. crash between ack and dequeue): drop it, do not resend.
     if (await db.ackedOps.get(head.opId)) {
@@ -72,10 +77,11 @@ export async function pushQueue(db: WashLogDB, transport: Transport): Promise<Pu
     try {
       res = await transport.sendOp(head);
     } catch (err) {
-      return { sent, error: message(err) };
+      return { sent, ...(refused ? { refused } : {}), error: message(err) };
     }
     await applyAck(db, head, res); // only reached after a 2xx acknowledgment
     sent++;
+    if (res.reasons?.length) refused++;
   }
 }
 
@@ -108,6 +114,7 @@ export async function refreshConflicts(db: WashLogDB, transport: Transport): Pro
 export interface SyncResult {
   ok: boolean;
   sent: number;
+  refused?: number;
   error?: string;
 }
 
@@ -127,18 +134,18 @@ async function runSync(db: WashLogDB, transport: Transport): Promise<SyncResult>
   const push = await pushQueue(db, transport);
   if (push.error) {
     await setMeta(db, 'lastError', push.error);
-    return { ok: false, sent: push.sent, error: push.error };
+    return { ok: false, sent: push.sent, refused: push.refused, error: push.error };
   }
   try {
     await pullChanges(db, transport);
     await refreshConflicts(db, transport);
   } catch (err) {
     await setMeta(db, 'lastError', message(err));
-    return { ok: false, sent: push.sent, error: message(err) };
+    return { ok: false, sent: push.sent, refused: push.refused, error: message(err) };
   }
   await db.meta.bulkPut([
     { key: 'lastSyncAt', value: new Date().toISOString() },
     { key: 'lastError', value: null },
   ]);
-  return { ok: true, sent: push.sent };
+  return { ok: true, sent: push.sent, refused: push.refused };
 }

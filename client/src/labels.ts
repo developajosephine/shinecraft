@@ -85,3 +85,5 @@ export function fieldErrors(err: unknown): Record<string, string> {
   }
   return out;
 }
+
+export const ROLE_LABEL: Record<'attendant' | 'cashier' | 'manager', string> = { attendant: 'Attendant', cashier: 'Cashier', manager: 'Manager' };
