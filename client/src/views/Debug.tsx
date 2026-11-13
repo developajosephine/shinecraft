@@ -4,6 +4,8 @@ import type { Op } from '@washlog/shared';
 import { demoDropAckNext, demoFailNext, demoStatus, type DemoStatus } from '../api';
 import { db } from '../db';
 import { shortId } from '../hooks';
+import { toast } from '../toast';
+import { Icon } from '../ui';
 
 export function Debug({ online }: { online: boolean }) {
   const queue = useLiveQuery(() => db.opQueue.orderBy('seq').toArray(), [], [] as Op[]);
@@ -20,20 +22,25 @@ export function Debug({ online }: { online: boolean }) {
     };
   }, [online]);
 
-  const toggle = async (action: () => Promise<DemoStatus>) => {
+  const toggle = async (action: () => Promise<DemoStatus>, message: string) => {
     try {
       setDemo(await action());
+      toast(message, 'info');
     } catch {
       setDemo(null);
+      toast('Could not reach the server', 'bad');
     }
   };
 
   return (
     <section>
-      <h2>Debug</h2>
+      <a className="link-row back" href="#/sync">
+        <Icon name="back" size={18} /> Back to Sync
+      </a>
+      <h2>Developer view</h2>
       <dl className="facts">
         <dt>Device ID</dt>
-        <dd>{deviceId ? shortId(deviceId) : '—'}</dd>
+        <dd className="mono">{deviceId ? shortId(deviceId) : '—'}</dd>
         <dt>Records in map</dt>
         <dd>{records}</dd>
         <dt>Acked op IDs</dt>
@@ -46,38 +53,40 @@ export function Debug({ online }: { online: boolean }) {
       {queue.length === 0 ? (
         <p className="muted">Queue is empty — everything is synced.</p>
       ) : (
-        <table className="queue">
-          <thead>
-            <tr>
-              <th>seq</th>
-              <th>opId</th>
-              <th>type</th>
-              <th>record</th>
-            </tr>
-          </thead>
-          <tbody>
-            {queue.map((op, i) => (
-              <tr key={op.seq} className={i === 0 ? 'head' : ''}>
-                <td>{op.seq}</td>
-                <td>{shortId(op.opId)}</td>
-                <td>
-                  {op.type} {op.recordType}
-                </td>
-                <td>{shortId(op.recordId)}</td>
+        <div className="table-wrap">
+          <table className="queue">
+            <thead>
+              <tr>
+                <th>seq</th>
+                <th>opId</th>
+                <th>type</th>
+                <th>record</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {queue.map((op, i) => (
+                <tr key={op.seq} className={i === 0 ? 'head' : ''}>
+                  <td>{op.seq}</td>
+                  <td>{shortId(op.opId)}</td>
+                  <td>
+                    {op.type} {op.recordType}
+                  </td>
+                  <td>{shortId(op.recordId)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
 
       {demo?.demoMode && (
         <>
           <h3>Demo toggles (server DEMO_MODE)</h3>
-          <div className="row">
-            <button onClick={() => toggle(demoFailNext)} disabled={demo.failNext}>
+          <div className="demo-buttons">
+            <button className="btn" onClick={() => toggle(demoFailNext, 'Armed: the next sync will fail')} disabled={demo.failNext}>
               {demo.failNext ? 'Fail next sync: armed' : 'Fail next sync'}
             </button>
-            <button onClick={() => toggle(demoDropAckNext)} disabled={demo.dropAckNext}>
+            <button className="btn" onClick={() => toggle(demoDropAckNext, 'Armed: the next acknowledgment will be dropped')} disabled={demo.dropAckNext}>
               {demo.dropAckNext ? 'Drop next ack: armed' : 'Drop next ack'}
             </button>
           </div>

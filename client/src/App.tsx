@@ -2,8 +2,10 @@ import { useCallback, useEffect, useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { httpTransport } from './api';
 import { db } from './db';
-import { go, useHashRoute, useOnline } from './hooks';
+import { useHashRoute, useOnline } from './hooks';
 import { syncOnce } from './sync';
+import { toast } from './toast';
+import { Icon, Toasts, type IconName } from './ui';
 import { Conflicts } from './views/Conflicts';
 import { Debug } from './views/Debug';
 import { JobForm } from './views/JobForm';
@@ -12,13 +14,14 @@ import { Setup } from './views/Setup';
 import { Supplies } from './views/Supplies';
 import { SyncPanel } from './views/SyncPanel';
 
-const TABS = [
-  ['jobs', 'Jobs'],
-  ['supplies', 'Supplies'],
-  ['sync', 'Sync'],
-  ['conflicts', 'Conflicts'],
-  ['debug', 'Debug'],
-] as const;
+const TABS: { key: string; label: string; icon: IconName }[] = [
+  { key: 'jobs', label: 'Jobs', icon: 'car' },
+  { key: 'supplies', label: 'Supplies', icon: 'box' },
+  { key: 'sync', label: 'Sync', icon: 'sync' },
+  { key: 'conflicts', label: 'Conflicts', icon: 'alert' },
+];
+
+export type LinkState = 'on' | 'warn' | 'off';
 
 export default function App() {
   // undefined = still loading, null = first run
@@ -35,7 +38,7 @@ export default function App() {
   const runSync = useCallback(async () => {
     setSyncing(true);
     try {
-      await syncOnce(db, httpTransport);
+      return await syncOnce(db, httpTransport);
     } finally {
       setSyncing(false);
     }
@@ -61,53 +64,80 @@ export default function App() {
     if (navigator.onLine) void runSync();
   }, [runSync]);
 
+  /** "Sync now" pressed by a person: tell them what happened. */
+  const manualSync = useCallback(async () => {
+    const result = await runSync();
+    if (!result.ok) toast('Sync failed. Your changes are still saved on this phone.', 'bad');
+    else toast(result.sent > 0 ? `Synced ${result.sent} ${result.sent === 1 ? 'change' : 'changes'}` : 'Everything is up to date');
+  }, [runSync]);
+
   if (device === undefined) return null;
   if (device === null) return <Setup />;
 
   // navigator.onLine only says "has a network"; a failed sync says the server was not reachable.
-  const link = !online ? 'off' : lastError ? 'warn' : 'on';
+  const link: LinkState = !online ? 'off' : lastError ? 'warn' : 'on';
   const linkLabel = { off: 'Offline', warn: 'Sync failed', on: 'Online' }[link];
-
   const tab = route[0] ?? 'jobs';
-  let view;
+
+  // The job form is a focused task: its own header, no tab bar.
   if (tab === 'job') {
-    view = (
-      <JobForm
-        key={route[1]}
-        id={route[1] === 'new' ? undefined : route[1]}
-        deviceName={device.deviceName}
-        onChanged={changed}
-      />
+    return (
+      <div className="app">
+        <JobForm key={route[1]} id={route[1] === 'new' ? undefined : route[1]} deviceName={device.deviceName} onChanged={changed} />
+        <Toasts />
+      </div>
     );
-  } else if (tab === 'supplies') view = <Supplies onChanged={changed} />;
-  else if (tab === 'sync') view = <SyncPanel online={online} syncing={syncing} onSync={runSync} />;
-  else if (tab === 'conflicts') view = <Conflicts deviceId={device.deviceId} onRefresh={runSync} />;
+  }
+
+  let view;
+  if (tab === 'supplies') view = <Supplies onChanged={changed} />;
+  else if (tab === 'sync') view = <SyncPanel link={link} syncing={syncing} onSync={manualSync} />;
+  else if (tab === 'conflicts') view = <Conflicts deviceId={device.deviceId} onRefresh={manualSync} />;
   else if (tab === 'debug') view = <Debug online={online} />;
-  else view = <Jobs />;
+  else view = <Jobs onChanged={changed} />;
 
   return (
     <div className="app">
       <header className="topbar">
-        <strong>WashLog</strong>
+        <span className="brand">
+          <span className="brand-mark">
+            <Icon name="drop" size={18} />
+          </span>
+          WashLog
+        </span>
         <span className="device">{device.deviceName}</span>
-        <button className="pill" onClick={() => go('sync')} aria-label="Open sync panel">
-          <span className={`dot ${link}`} />
+        <a className={`pill ${link}`} href="#/sync" aria-label={`Connection: ${linkLabel}. Open sync.`}>
+          <span className="dot" />
           {linkLabel}
-          {pendingCount > 0 && <span className="count">{pendingCount} pending</span>}
-        </button>
+          {pendingCount > 0 && <span className="pill-count">{pendingCount}</span>}
+        </a>
       </header>
-      {link === 'off' && <div className="offline-banner">Offline — changes saved on this phone</div>}
+      {link === 'off' && (
+        <div className="banner">
+          <Icon name="offline" size={18} /> Offline — changes saved on this phone
+        </div>
+      )}
       {link === 'warn' && (
-        <div className="offline-banner">Last sync failed — changes saved on this phone</div>
+        <div className="banner">
+          <Icon name="alert" size={18} /> Last sync failed — changes saved on this phone
+        </div>
       )}
       <main>{view}</main>
-      <nav className="tabs">
-        {TABS.map(([key, label]) => (
-          <a key={key} href={`#/${key}`} className={tab === key || (key === 'jobs' && tab === 'job') ? 'active' : ''}>
-            {label}
-          </a>
-        ))}
+      <nav className="tabs" aria-label="Main">
+        {TABS.map((t) => {
+          const active = tab === t.key || (t.key === 'sync' && tab === 'debug');
+          return (
+            <a key={t.key} href={`#/${t.key}`} className={active ? 'active' : ''} aria-current={active ? 'page' : undefined}>
+              <span className="tab-icon">
+                <Icon name={t.icon} size={22} />
+                {t.key === 'sync' && pendingCount > 0 && <span className="tab-badge">{pendingCount}</span>}
+              </span>
+              {t.label}
+            </a>
+          );
+        })}
       </nav>
+      <Toasts />
     </div>
   );
 }
