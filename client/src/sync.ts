@@ -1,4 +1,4 @@
-import type { ChangesResponse, ConflictLogEntry, Op, SyncResponse } from '@washlog/shared';
+import { mergeCatalog, type Catalog, type ChangesResponse, type ConflictLogEntry, type Op, type SyncResponse } from '@washlog/shared';
 import { getMeta, setMeta, type LocalRecord, type WashLogDB } from './db';
 
 /** How the sync loop talks to the server. Throws on network error, non-2xx or timeout. */
@@ -6,10 +6,14 @@ export interface Transport {
   sendOp(op: Op): Promise<SyncResponse>;
   fetchChanges(since: number): Promise<ChangesResponse>;
   fetchConflicts(): Promise<ConflictLogEntry[]>;
+  /** Reference data (vehicle types, services, units). Optional: without it the built-in values are used. */
+  fetchCatalog?(): Promise<Catalog>;
 }
 
 export interface PushResult {
   sent: number;
+  /** Ops the server answered but refused (role rules). They leave the queue; see the conflict log. */
+  refused?: number;
   error?: string;
 }
 
@@ -27,6 +31,8 @@ async function applyAck(db: WashLogDB, op: Op, res: SyncResponse | null): Promis
     if (remaining === 0) {
       // No local edits left for this record: the server copy is the truth.
       if (res?.record) await db.records.put({ ...res.record, pending: false } as LocalRecord);
+      // A refused create never reached the server, so the local copy goes too.
+      else if (res?.status === 'rejected' && op.type === 'create') await db.records.delete(op.recordId);
       else await db.records.update(op.recordId, { pending: false });
     } else if (res?.record) {
       // Later local ops are still queued: keep the local fields, stay pending, track the version.
@@ -58,9 +64,10 @@ async function applyAck(db: WashLogDB, op: Op, res: SyncResponse | null): Promis
  */
 export async function pushQueue(db: WashLogDB, transport: Transport): Promise<PushResult> {
   let sent = 0;
+  let refused = 0;
   for (;;) {
     const head = await db.opQueue.orderBy('seq').first();
-    if (!head) return { sent };
+    if (!head) return refused ? { sent, refused } : { sent };
 
     // Already acknowledged (e.g. crash between ack and dequeue): drop it, do not resend.
     if (await db.ackedOps.get(head.opId)) {
@@ -72,10 +79,11 @@ export async function pushQueue(db: WashLogDB, transport: Transport): Promise<Pu
     try {
       res = await transport.sendOp(head);
     } catch (err) {
-      return { sent, error: message(err) };
+      return { sent, ...(refused ? { refused } : {}), error: message(err) };
     }
     await applyAck(db, head, res); // only reached after a 2xx acknowledgment
     sent++;
+    if (res.reasons?.length) refused++;
   }
 }
 
@@ -105,9 +113,23 @@ export async function refreshConflicts(db: WashLogDB, transport: Transport): Pro
   });
 }
 
+/**
+ * Keep the server's reference data on the phone for offline use. A failure here never fails the
+ * sync: the phone keeps the copy it has, or the built-in values.
+ */
+export async function refreshCatalog(db: WashLogDB, transport: Transport): Promise<void> {
+  if (!transport.fetchCatalog) return;
+  try {
+    await setMeta(db, 'catalog', mergeCatalog(await transport.fetchCatalog()));
+  } catch {
+    /* keep the stored or built-in catalog */
+  }
+}
+
 export interface SyncResult {
   ok: boolean;
   sent: number;
+  refused?: number;
   error?: string;
 }
 
@@ -127,18 +149,19 @@ async function runSync(db: WashLogDB, transport: Transport): Promise<SyncResult>
   const push = await pushQueue(db, transport);
   if (push.error) {
     await setMeta(db, 'lastError', push.error);
-    return { ok: false, sent: push.sent, error: push.error };
+    return { ok: false, sent: push.sent, refused: push.refused, error: push.error };
   }
   try {
     await pullChanges(db, transport);
     await refreshConflicts(db, transport);
+    await refreshCatalog(db, transport);
   } catch (err) {
     await setMeta(db, 'lastError', message(err));
-    return { ok: false, sent: push.sent, error: message(err) };
+    return { ok: false, sent: push.sent, refused: push.refused, error: message(err) };
   }
   await db.meta.bulkPut([
     { key: 'lastSyncAt', value: new Date().toISOString() },
     { key: 'lastError', value: null },
   ]);
-  return { ok: true, sent: push.sent };
+  return { ok: true, sent: push.sent, refused: push.refused };
 }

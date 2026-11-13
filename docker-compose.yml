@@ -38,7 +38,6 @@ services:
     build:
       context: .
       args:
-        VITE_SYNC_TOKEN: dev-token
         GIT_SHA: local-docker
     environment:
       DATABASE_URL: postgres://washlog:washlog@postgres:5432/washlog

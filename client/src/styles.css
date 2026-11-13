@@ -283,3 +283,11 @@ input:focus { outline: none; border-color: var(--brand); box-shadow: 0 0 0 3px v
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }
 }
+
+/* Login, account and manager screens */
+.account-btn { border: none; background: none; font: inherit; font-size: 0.85rem; text-align: left; cursor: pointer; min-height: 44px; padding: 0; }
+.notice { background: var(--warn-soft); color: var(--warn); border-radius: var(--radius-sm); padding: 10px 14px; font-size: 0.9rem; font-weight: 600; width: 100%; }
+.demo-accounts { width: 100%; display: grid; gap: 8px; }
+.user-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 12px 14px; }
+.muted-note { color: var(--muted); font-size: 0.8rem; font-weight: 600; background: none; cursor: default; }
+input:disabled, button.preset:disabled, .steps button:disabled { opacity: 0.55; cursor: not-allowed; }

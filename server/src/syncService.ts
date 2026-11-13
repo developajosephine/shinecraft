@@ -1,5 +1,8 @@
 import {
+  authorizeOp,
+  mergeCatalog,
   resolveLww,
+  type Catalog,
   type ConflictInfo,
   type FieldStamps,
   type ConflictLogEntry,
@@ -9,6 +12,7 @@ import {
   type WashRecord,
 } from '@washlog/shared';
 import type pg from 'pg';
+import { SERVICE_ACTOR, writeAudit, type Actor } from './auth';
 import type { Pool } from './db';
 
 interface RecordRow {
@@ -71,9 +75,32 @@ async function logConflict(client: pg.PoolClient, op: Op, conflict: ConflictInfo
 async function applyOp(
   client: pg.PoolClient,
   op: Op,
-): Promise<{ status: SyncStatus; row: RecordRow | null; conflict: ConflictInfo | null }> {
+  actor: Actor,
+): Promise<{ status: SyncStatus; row: RecordRow | null; conflict: ConflictInfo | null; reasons?: string[] }> {
   const found = await client.query<RecordRow>('SELECT * FROM records WHERE id = $1 FOR UPDATE', [op.recordId]);
   const row = found.rows[0] ?? null;
+
+  // Role rules first. A refused op is answered (not errored) so it leaves the phone's queue,
+  // and it is logged where everyone can see it.
+  const reasons = authorizeOp(actor.role, op, row?.data);
+  if (actor.kind === 'user' && actor.deviceId !== op.deviceId) reasons.push('This login belongs to a different device.');
+  if (reasons.length > 0) {
+    const conflict: ConflictInfo = {
+      winner: 'server',
+      fields: [
+        {
+          field: '(permission)',
+          winningValue: reasons.join(' '),
+          rejectedValue: op.type === 'delete' ? 'delete' : op.payload,
+          winningDevice: row?.updated_by ?? 'server',
+          rejectedDevice: op.deviceId,
+          policy: 'forbidden',
+        },
+      ],
+    };
+    await logConflict(client, op, conflict);
+    return { status: 'rejected', row, conflict, reasons };
+  }
 
   if (!row) {
     if (op.type !== 'create') return { status: 'rejected', row: null, conflict: null };
@@ -173,7 +200,7 @@ async function applyOp(
  * Handle one operation exactly once, in a single transaction:
  * claim the opId, lock the record, apply the policy, store the response, commit.
  */
-export async function handleOp(pool: Pool, op: Op): Promise<SyncResponse> {
+export async function handleOp(pool: Pool, op: Op, actor: Actor = SERVICE_ACTOR): Promise<SyncResponse> {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -205,13 +232,22 @@ export async function handleOp(pool: Pool, op: Op): Promise<SyncResponse> {
     await client.query('SELECT pg_advisory_xact_lock($1)', [WRITE_LOCK]);
 
     // 2–3. Lock the record and apply the policy.
-    const outcome = await applyOp(client, op);
+    const outcome = await applyOp(client, op, actor);
     const response: SyncResponse = {
       opId: op.opId,
       status: outcome.status,
       record: outcome.row ? rowToRecord(outcome.row) : null,
       conflict: outcome.conflict,
+      ...(outcome.reasons ? { reasons: outcome.reasons } : {}),
     };
+
+    // Who did what: written in the same transaction as the change itself.
+    await writeAudit(client, { ...actor, deviceId: op.deviceId }, {
+      action: `${op.recordType}.${op.type}`,
+      outcome: outcome.status,
+      recordId: op.recordId,
+      detail: { opId: op.opId, fields: Object.keys(op.payload), ...(outcome.reasons ? { reasons: outcome.reasons } : {}) },
+    });
 
     // 4. Store the response next to the op ID and commit both together with the record.
     await client.query('UPDATE processed_ops SET result = $2::jsonb WHERE op_id = $1', [
@@ -237,6 +273,20 @@ export async function changesSince(pool: Pool, since: number): Promise<{ records
 export async function allRecords(pool: Pool): Promise<WashRecord[]> {
   const res = await pool.query<RecordRow>('SELECT * FROM records ORDER BY change_seq');
   return res.rows.map(rowToRecord);
+}
+
+/** Reference data from the lookup tables (migration 004), merged over the built-in defaults. */
+export async function readCatalog(pool: Pool): Promise<Catalog> {
+  const [vehicles, services, units] = await Promise.all([
+    pool.query('SELECT code, label, default_water_litres FROM vehicle_types ORDER BY sort_order, code'),
+    pool.query('SELECT code, label, default_price_kes FROM services ORDER BY sort_order, code'),
+    pool.query('SELECT code, label FROM supply_units ORDER BY sort_order, code'),
+  ]);
+  return mergeCatalog({
+    vehicleTypes: vehicles.rows.map((r) => ({ code: r.code, label: r.label, defaultWaterLitres: Number(r.default_water_litres) })),
+    services: services.rows.map((r) => ({ code: r.code, label: r.label, defaultPriceKes: r.default_price_kes })),
+    supplyUnits: units.rows.map((r) => ({ code: r.code, label: r.label })),
+  });
 }
 
 export async function recentConflicts(pool: Pool, limit = 200): Promise<ConflictLogEntry[]> {

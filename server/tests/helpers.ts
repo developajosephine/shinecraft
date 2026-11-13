@@ -33,6 +33,7 @@ export async function setup(demoMode = true): Promise<TestContext> {
     demoMode,
     revision: 'test',
     clientDist: '/nonexistent',
+    limits: { loginPerMinute: 1000 }, // the suites log in far more often than a person would
     log: (line) => logs.push(line),
   });
   return { pool, app, logs };

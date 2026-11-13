@@ -1,15 +1,10 @@
-import type { JobStatus, Service, SupplyUnit, VehicleType } from '@washlog/shared';
+import { DEFAULT_CATALOG, type JobStatus, type Service, type SupplyUnit, type VehicleType } from '@washlog/shared';
 import { ValidationError } from './store';
 
 export const cap = (s: string) => (s ? s[0].toUpperCase() + s.slice(1) : s);
 
-export const VEHICLE_LABEL: Record<VehicleType, string> = {
-  saloon: 'Saloon',
-  suv: 'SUV',
-  matatu: 'Matatu',
-  motorbike: 'Motorbike',
-  pickup: 'Pickup',
-};
+/** Built-in names and defaults (shared DEFAULT_CATALOG). Screens use useCatalog(), which prefers the server's copy. */
+export const VEHICLE_LABEL = Object.fromEntries(DEFAULT_CATALOG.vehicleTypes.map((v) => [v.code, v.label])) as Record<VehicleType, string>;
 
 export const STATUS_LABEL: Record<JobStatus, string> = {
   waiting: 'Waiting',
@@ -27,11 +22,11 @@ export const NEXT_STEP: Record<JobStatus, { next: JobStatus; label: string } | n
 };
 
 /** Suggested values for a new job; the attendant can always change them. */
-export const SERVICE_PRICE: Record<Service, number> = { body: 300, full: 600, interior: 400, engine: 500 };
-export const VEHICLE_WATER: Record<VehicleType, number> = { saloon: 40, suv: 60, matatu: 90, motorbike: 15, pickup: 55 };
+export const SERVICE_PRICE = Object.fromEntries(DEFAULT_CATALOG.services.map((s) => [s.code, s.defaultPriceKes])) as Record<Service, number>;
+export const VEHICLE_WATER = Object.fromEntries(DEFAULT_CATALOG.vehicleTypes.map((v) => [v.code, v.defaultWaterLitres])) as Record<VehicleType, number>;
 export const PRICE_PRESETS = [200, 300, 400, 500, 600, 800];
 
-export const UNIT_LABEL: Record<SupplyUnit, string> = { litres: 'litres', bottles: 'bottles', kg: 'kg', pct: '%' };
+export const UNIT_LABEL = Object.fromEntries(DEFAULT_CATALOG.supplyUnits.map((u) => [u.code, u.label])) as Record<SupplyUnit, string>;
 export const UNIT_STEP: Record<SupplyUnit, number> = { litres: 10, bottles: 1, kg: 1, pct: 5 };
 
 export const FIELD_LABEL: Record<string, string> = {
@@ -85,3 +80,5 @@ export function fieldErrors(err: unknown): Record<string, string> {
   }
   return out;
 }
+
+export const ROLE_LABEL: Record<'attendant' | 'cashier' | 'manager', string> = { attendant: 'Attendant', cashier: 'Cashier', manager: 'Manager' };

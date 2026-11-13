@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { JobRecord, WashRecord } from '@washlog/shared';
+import { DEFAULT_CATALOG, mergeCatalog, type JobRecord, type WashRecord } from '@washlog/shared';
 import { createRecord, updateRecord } from '../src/store';
 import { pullChanges, pushQueue, syncOnce } from '../src/sync';
 import { FakeServer, jobFields, newDb } from './helpers';
@@ -108,5 +108,33 @@ describe('sync loop', () => {
     expect(synced.version).toBe(5);
     expect(await db.records.get(brandNew.id)).toBeDefined();
     expect((await db.meta.get('lastPulledSeq'))!.value).toBe(42);
+  });
+});
+
+describe('reference data (catalog)', () => {
+  it('a sync stores the server catalog on the phone; a failed catalog fetch keeps the stored copy and does not fail the sync', async () => {
+    const db = await newDb();
+    const server = new FakeServer();
+    const custom = mergeCatalog({ services: [{ code: 'body', label: 'Body only', defaultPriceKes: 350 }] });
+    let catalogFails = false;
+    const transport = Object.assign(server, {
+      fetchCatalog: async () => {
+        if (catalogFails) throw new Error('Network error — server unreachable');
+        return custom;
+      },
+    });
+
+    expect((await syncOnce(db, transport)).ok).toBe(true);
+    expect((await db.meta.get('catalog'))!.value).toEqual(custom);
+
+    catalogFails = true;
+    expect((await syncOnce(db, transport)).ok).toBe(true);
+    expect((await db.meta.get('catalog'))!.value).toEqual(custom);
+  });
+
+  it('without a catalog from the server the built-in values are used', async () => {
+    const db = await newDb();
+    expect(await db.meta.get('catalog')).toBeUndefined();
+    expect(mergeCatalog((await db.meta.get('catalog'))?.value)).toEqual(DEFAULT_CATALOG);
   });
 });

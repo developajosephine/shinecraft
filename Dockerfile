@@ -7,9 +7,6 @@ COPY client/package.json client/
 COPY server/package.json server/
 RUN npm ci
 COPY . .
-# The sync token is baked into the client bundle at build time.
-ARG VITE_SYNC_TOKEN
-ENV VITE_SYNC_TOKEN=$VITE_SYNC_TOKEN
 RUN npm run build
 
 # ---- runtime: production deps + built artefacts only ----

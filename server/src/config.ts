@@ -19,6 +19,12 @@ export interface Config {
   revision: string;
   /** Load the synthetic demo data on startup (for hosts whose database cannot be reached from outside). */
   seedOnStart: boolean;
+  /** Reverse proxies in front of the app; rate limits need the real client IP. */
+  trustProxy: number;
+  hsts: boolean;
+  /** Optional first manager account for a non-demo deployment. */
+  adminName: string;
+  adminPin: string;
 }
 
 export function loadConfig(): Config {
@@ -43,5 +49,9 @@ export function loadConfig(): Config {
     demoMode: process.env.DEMO_MODE ? process.env.DEMO_MODE === 'true' : !production,
     revision: process.env.GIT_SHA || 'dev',
     seedOnStart: process.env.SEED_ON_START === 'true',
+    trustProxy: process.env.TRUST_PROXY ? Number(process.env.TRUST_PROXY) || 0 : production ? 1 : 0,
+    hsts: production,
+    adminName: process.env.ADMIN_NAME || '',
+    adminPin: process.env.ADMIN_PIN || '',
   };
 }

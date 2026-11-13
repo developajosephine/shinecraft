@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
-import { JOB_STATUSES, SERVICES, VEHICLE_TYPES, type JobRecord, type JobStatus, type Service, type VehicleType } from '@washlog/shared';
+import { JOB_STATUSES, can, type JobRecord, type JobStatus, type Service, type VehicleType } from '@washlog/shared';
 import { db } from '../db';
-import { go } from '../hooks';
-import { PRICE_PRESETS, SERVICE_PRICE, STATUS_LABEL, VEHICLE_LABEL, VEHICLE_WATER, cap, fieldErrors } from '../labels';
+import { go, useCatalog, useRole } from '../hooks';
+import { PRICE_PRESETS, SERVICE_PRICE, STATUS_LABEL, VEHICLE_WATER, fieldErrors } from '../labels';
 import { createRecord, deleteRecord, updateRecord } from '../store';
 import { toast } from '../toast';
 import { Icon, Sheet, Tiles } from '../ui';
@@ -17,6 +17,11 @@ interface Props {
 type Payment = '' | 'cash' | 'mpesa';
 
 export function JobForm({ id, deviceName, onChanged }: Props) {
+  const role = useRole(); // before any early return: hooks must run in the same order every render
+  // Names and suggested price / water: the server's lookup tables when synced, built-in values otherwise.
+  const catalog = useCatalog();
+  const priceOf = (s: Service) => catalog.services.find((e) => e.code === s)?.defaultPriceKes ?? SERVICE_PRICE[s];
+  const waterOf = (v: VehicleType) => catalog.vehicleTypes.find((e) => e.code === v)?.defaultWaterLitres ?? VEHICLE_WATER[v];
   const existing = useLiveQuery(
     async () => (id ? (((await db.records.get(id)) as JobRecord | undefined) ?? null) : null),
     [id],
@@ -54,6 +59,17 @@ export function JobForm({ id, deviceName, onChanged }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loadedId]);
 
+  // A new job: when the catalog arrives (or changes), refresh the suggestions not yet edited by hand.
+  useEffect(() => {
+    if (id) return;
+    setForm((f) => ({
+      ...f,
+      priceKes: touched.current.price ? f.priceKes : String(priceOf(f.service)),
+      waterLitres: touched.current.water ? f.waterLitres : String(waterOf(f.vehicleType)),
+    }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id, catalog]);
+
   if (id && existing === undefined) return null; // loading
   if (id && (existing === null || existing?.deleted)) {
     return (
@@ -75,12 +91,12 @@ export function JobForm({ id, deviceName, onChanged }: Props) {
   };
 
   const pickService = (service: Service) =>
-    setForm((f) => ({ ...f, service, priceKes: !existing && !touched.current.price ? String(SERVICE_PRICE[service]) : f.priceKes }));
+    setForm((f) => ({ ...f, service, priceKes: !existing && !touched.current.price ? String(priceOf(service)) : f.priceKes }));
   const pickVehicle = (vehicleType: VehicleType) =>
     setForm((f) => ({
       ...f,
       vehicleType,
-      waterLitres: !existing && !touched.current.water ? String(VEHICLE_WATER[vehicleType]) : f.waterLitres,
+      waterLitres: !existing && !touched.current.water ? String(waterOf(vehicleType)) : f.waterLitres,
     }));
   const bumpWater = (by: number) => {
     touched.current.water = true;
@@ -90,6 +106,10 @@ export function JobForm({ id, deviceName, onChanged }: Props) {
   const save = async (e: FormEvent) => {
     e.preventDefault();
     setErrors({});
+    if (!existing && newStatus === 'paid' && !form.paymentMethod) {
+      setErrors({ paymentMethod: 'Choose how the customer paid (cash or M-Pesa) before saving the job as paid.' });
+      return;
+    }
     const fields = {
       plate: form.plate,
       vehicleType: form.vehicleType,
@@ -123,8 +143,19 @@ export function JobForm({ id, deviceName, onChanged }: Props) {
   /** Status steps on an existing job apply immediately, as their own queued change. */
   const pickStatus = async (status: JobStatus) => {
     if (!existing) return setNewStatus(status);
+    // A paid job always records how it was paid, so the payment method is never left empty.
+    const method = form.paymentMethod || existing.paymentMethod;
+    if (status === 'paid' && !method) {
+      setErrors({ paymentMethod: 'Choose how the customer paid (cash or M-Pesa) under Payment, then mark the job paid.' });
+      document.getElementById('f-paymentMethod')?.scrollIntoView({ block: 'center' });
+      return;
+    }
+    const changes =
+      status === 'paid'
+        ? { status, paymentMethod: method, mpesaCode: method === 'mpesa' ? (form.paymentMethod ? form.mpesaCode.trim().toUpperCase() || null : existing.mpesaCode ?? null) : null }
+        : { status };
     try {
-      if (await updateRecord(db, existing.id, { status })) {
+      if (await updateRecord(db, existing.id, changes)) {
         toast(`${existing.plate}: ${STATUS_LABEL[status].toLowerCase()}`);
         onChanged();
       }
@@ -141,6 +172,9 @@ export function JobForm({ id, deviceName, onChanged }: Props) {
     go('jobs');
   };
 
+  const canPay = can(role, 'takePayment');
+  const canPrice = !existing || can(role, 'changePrice');
+  const canReassign = can(role, 'reassignJob');
   const status = existing ? existing.status : newStatus;
   const statusIndex = JOB_STATUSES.indexOf(status);
   const err = (field: string) => errors[field] || '';
@@ -152,7 +186,7 @@ export function JobForm({ id, deviceName, onChanged }: Props) {
           <Icon name="back" size={22} />
         </a>
         <h1>{existing ? `Edit ${existing.plate}` : 'Add car'}</h1>
-        {existing && (
+        {existing && can(role, 'deleteRecords') && (
           <button className="icon-btn danger" onClick={() => setConfirmDelete(true)} aria-label={`Delete ${existing.plate}`}>
             <Icon name="trash" size={20} />
           </button>
@@ -166,7 +200,7 @@ export function JobForm({ id, deviceName, onChanged }: Props) {
             <ol className="steps">
               {JOB_STATUSES.map((s, i) => (
                 <li key={s} className={i < statusIndex ? 'past' : i === statusIndex ? 'current' : ''}>
-                  <button type="button" onClick={() => pickStatus(s)} aria-current={i === statusIndex ? 'step' : undefined}>
+                  <button type="button" onClick={() => pickStatus(s)} disabled={s === 'paid' && !canPay} aria-current={i === statusIndex ? 'step' : undefined}>
                     <span className="step-dot">{i < statusIndex ? <Icon name="check" size={14} /> : i + 1}</span>
                     {STATUS_LABEL[s]}
                   </button>
@@ -196,7 +230,7 @@ export function JobForm({ id, deviceName, onChanged }: Props) {
             columns={3}
             value={form.vehicleType}
             onChange={pickVehicle}
-            options={VEHICLE_TYPES.map((v) => ({ value: v, label: VEHICLE_LABEL[v] }))}
+            options={catalog.vehicleTypes.map((v) => ({ value: v.code, label: v.label }))}
           />
 
           <Tiles
@@ -204,7 +238,7 @@ export function JobForm({ id, deviceName, onChanged }: Props) {
             columns={2}
             value={form.service}
             onChange={pickService}
-            options={SERVICES.map((s) => ({ value: s, label: `${cap(s)} wash`, hint: `usually KES ${SERVICE_PRICE[s]}` }))}
+            options={catalog.services.map((s) => ({ value: s.code, label: s.label, hint: `usually KES ${s.defaultPriceKes.toLocaleString()}` }))}
           />
 
           <div className={`field ${err('priceKes') ? 'invalid' : ''}`}>
@@ -219,6 +253,7 @@ export function JobForm({ id, deviceName, onChanged }: Props) {
                   set('priceKes', e.target.value);
                 }}
                 inputMode="numeric"
+                disabled={!canPrice}
               />
             </div>
             <div className="presets" role="group" aria-label="Quick prices">
@@ -227,6 +262,7 @@ export function JobForm({ id, deviceName, onChanged }: Props) {
                   type="button"
                   key={p}
                   className={`preset ${Number(form.priceKes) === p ? 'on' : ''}`}
+                  disabled={!canPrice}
                   onClick={() => {
                     touched.current.price = true;
                     set('priceKes', String(p));
@@ -264,19 +300,25 @@ export function JobForm({ id, deviceName, onChanged }: Props) {
             {err('waterLitres') && <p className="field-error">{err('waterLitres')}</p>}
           </div>
 
-          <Tiles
-            label="Payment"
-            columns={3}
-            value={form.paymentMethod}
-            onChange={(v) => set('paymentMethod', v)}
-            options={[
-              { value: '', label: 'Not paid yet' },
-              { value: 'cash', label: 'Cash' },
-              { value: 'mpesa', label: 'M-Pesa' },
-            ]}
-          />
+          {!canPay && <p className="hint">Payment is recorded by the cashier or manager.</p>}
+          {canPay && (
+            <div id="f-paymentMethod" className={err('paymentMethod') ? 'invalid' : ''}>
+              <Tiles
+                label="Payment"
+                columns={3}
+                value={form.paymentMethod}
+                onChange={(v) => set('paymentMethod', v)}
+                options={[
+                  { value: '', label: 'Not paid yet' },
+                  { value: 'cash', label: 'Cash' },
+                  { value: 'mpesa', label: 'M-Pesa' },
+                ]}
+              />
+              {err('paymentMethod') && <p className="field-error">{err('paymentMethod')}</p>}
+            </div>
+          )}
 
-          {form.paymentMethod === 'mpesa' && (
+          {canPay && form.paymentMethod === 'mpesa' && (
             <div className={`field ${err('mpesaCode') ? 'invalid' : ''}`}>
               <label htmlFor="f-mpesaCode">M-Pesa code (optional)</label>
               <input
@@ -293,7 +335,7 @@ export function JobForm({ id, deviceName, onChanged }: Props) {
 
           <div className={`field ${err('attendant') ? 'invalid' : ''}`}>
             <label htmlFor="f-attendant">Attendant</label>
-            <input id="f-attendant" value={form.attendant} onChange={(e) => set('attendant', e.target.value)} maxLength={60} />
+            <input id="f-attendant" value={form.attendant} onChange={(e) => set('attendant', e.target.value)} maxLength={60} disabled={!canReassign} />
             {err('attendant') && <p className="field-error">{err('attendant')}</p>}
           </div>
 

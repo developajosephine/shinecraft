@@ -37,13 +37,14 @@ flowchart LR
     SW[Service worker<br/>precached app shell]
   end
   subgraph Server["One service (Node 20 + Express)"]
-    API["/api/sync/ops · /api/sync/changes<br/>/api/conflicts · /healthz"]
+    API["/api/sync/ops · /api/sync/changes<br/>/api/conflicts · /api/catalog · /healthz"]
     STATIC[Static client/dist + SPA fallback]
   end
   subgraph PG[(PostgreSQL)]
     R[records]
     P[processed_ops]
     C[conflict_log]
+    V[jobs / supplies views<br/>vehicle_types · services · supply_units]
   end
   LOOP -- "POST one op (Bearer token)" --> API
   API -- "applied / duplicate /<br/>conflict_resolved / rejected" --> LOOP
@@ -86,20 +87,21 @@ Then run `npm run setup`; it sees `DATABASE_URL` and skips Docker.
 | `Docker is installed but not running` | Docker Desktop is closed | open it, wait until it is running, run `npm run setup` again |
 | `rejected the username or password` | wrong credentials in `.env` | fix `DATABASE_URL` |
 | `.env` seems ignored | wrong folder, or saved as `.env.txt` | it must be named exactly `.env`, next to the root `package.json` |
-| `401` in the Sync panel | client and server tokens differ | make `SYNC_TOKEN` and `VITE_SYNC_TOKEN` equal, restart `npm run dev` |
+| "Your login ended" | session expired, PIN or role changed, or account switched off | log in again; unsynced changes stay on the phone and are sent afterwards |
 
 **Environment variables** (names only; see [`.env.example`](.env.example)):
 
 | Variable | Used by | Purpose |
 |---|---|---|
 | `DATABASE_URL` | server | PostgreSQL connection string |
-| `SYNC_TOKEN` | server | bearer token required on `/api/*` |
+| `SYNC_TOKEN` | server | operator token for scripts and `curl` (acts as a manager); never sent to browsers |
 | `PORT` | server | listen port (default 8080) |
 | `GIT_SHA` | server | reported as `revision` by `/healthz` |
-| `DEMO_MODE` | server | `true` enables the demo failure toggles |
+| `DEMO_MODE` | server | `true` creates the synthetic demo logins and enables the failure toggles (managers only) |
 | `TEST_DATABASE_URL` | server tests | PostgreSQL used by `npm test` |
 | `SEED_ON_START` | server | `true` loads the synthetic demo data on startup (idempotent) |
-| `VITE_SYNC_TOKEN` | client build | optional fallback only; the client normally reads the token from the server at runtime (`/app-config.json`) |
+| `ADMIN_NAME`, `ADMIN_PIN` | server | create a first manager account on start (only if that name is free) |
+| `TRUST_PROXY` | server | number of reverse proxies in front of the app, so rate limits see the real client IP (default 1 in production) |
 
 For local development no `.env` is needed: outside `NODE_ENV=production` the server falls back to the docker-compose databases and a development-only token. In production `DATABASE_URL` and `SYNC_TOKEN` are required and the server refuses to start without them.
 
@@ -144,6 +146,15 @@ Sent in order, the five samples return `applied`, `applied`, `conflict_resolved`
 | **Op-ID set** | Dexie `ackedOps`, key `opId` | operations the server has acknowledged | membership/insert average O(1) as a hash set |
 | **Processed-ops index** | PostgreSQL `processed_ops` primary key | server-side exactly-once guard | O(log n) B-tree lookup/insert |
 
+**What is in PostgreSQL.** Every job and supply is one row in `records`. Its fields (plate, vehicle type, service, price, status, payment method, M-Pesa code, attendant, water, created time; item, quantity, unit) are stored in the `data` jsonb column, which is the source of truth for sync and conflict resolution. To read them as ordinary columns, query the views added in migration `004_readable_data.sql`:
+
+```sql
+SELECT plate, vehicle_type, service, price_kes, status, payment_method, attendant, water_litres, created_at FROM jobs;
+SELECT item, quantity, unit FROM supplies;
+```
+
+The views leave out deleted records (they stay in `records` as tombstones). The reference data is in tables too: `vehicle_types` (name, default water), `services` (name, default price) and `supply_units`, seeded from `shared/src/catalog.ts`. A manager can change a name or a default price there; phones fetch it on their next sync (`GET /api/catalog`) and keep using the built-in values while offline. The codes themselves are fixed by the app's schema, so new vehicle types or services still need a code change. Changes still queued on a phone that has not synced are not in PostgreSQL yet, by design.
+
 Those are the abstract costs. The honest physical costs:
 
 - IndexedDB stores are B-trees, so each queue, map or set operation on the phone is **O(log n)** in the size of that store, plus transaction overhead.
@@ -181,9 +192,9 @@ The response is `{ opId, status, record, conflict }` with status `applied`, `dup
 
 **Triggers:** app start, the browser `online` event, the "Sync now" button, every 30 s while online, and right after a local change if the phone appears online. `navigator.onLine` is treated as a hint only; a failed sync is what marks the server as unreachable.
 
-**Validation and auth.** Every op is validated with the shared zod schema; an invalid op gets `400` with reasons, nothing is written and the op ID is not recorded. All `/api/*` routes require `Authorization: Bearer <SYNC_TOKEN>` and return `401` otherwise. JSON bodies are limited to 100 kb.
+**Validation and auth.** Every op is validated with the shared zod schema; an invalid op gets `400` with reasons, nothing is written and the op ID is not recorded. All `/api/*` routes except login need `Authorization: Bearer <session token>` (or the operator `SYNC_TOKEN`) and return `401` otherwise. Each op is then checked against the sender's role (see section 10); a refused op is answered `200` with `status: "rejected"` and `reasons`, so it leaves the phone's queue instead of blocking it, and it is recorded in the conflict log and the audit log. JSON bodies are limited to 100 kb.
 
-**Other endpoints:** `GET /app-config.json` (gives the client its sync token at runtime), `GET /healthz` (`{status, db, revision}`, 503 if the database is unreachable), `GET /api/conflicts`, `GET /api/records`, and when `DEMO_MODE=true`: `POST /api/demo/fail-next` (next op gets 503, nothing applied) and `POST /api/demo/drop-ack-next` (next op is applied and committed, then answered with 503).
+**Other endpoints:** `POST /api/auth/login` (`{name, pin, deviceId}` → session), `POST /api/auth/logout`, `GET /api/auth/me`, `GET /api/auth/options` (demo accounts, only in demo mode), manager only: `GET/POST /api/users`, `PATCH /api/users/:id`, `GET /api/audit`; `GET /healthz` (`{status, db, revision}`, 503 if the database is unreachable), `GET /api/conflicts`, `GET /api/records`, and when `DEMO_MODE=true` (manager only): `POST /api/demo/fail-next` (next op gets 503, nothing applied) and `POST /api/demo/drop-ack-next` (next op is applied and committed, then answered with 503).
 
 ## 7. Conflict and deletion policy
 
@@ -198,19 +209,20 @@ One deliberate choice: the comparison is made per field rather than once per rec
 
 ## 8. Demo script
 
-Use the live URL, or locally `npm run build && npm start` at http://localhost:8080 after `npm run seed`. Open the app in **two browser profiles** (A and B) and give each a device name. "Offline" means DevTools → Network → Offline. The **Developer view** (Sync tab → Developer view) shows the queue with op IDs and the demo buttons.
+Use the live URL, or locally `npm run build && npm start` at http://localhost:8080 after `npm run seed`. Open the app in **two browser profiles**: log in on A as **Manager** and on B as **Chiku** (cashier); with `DEMO_MODE=true` the login screen lists these synthetic accounts, PIN `2468`. "Offline" means DevTools → Network → Offline. The **Developer view** (Sync tab → Developer view) shows the queue with op IDs and the demo buttons.
 
 1. **Online create.** In A, tap **Add car**, enter a plate, save. The job shows **Synced**.
-2. **Offline create, edit, delete, reload.** In A, go offline. The banner "Offline — changes saved on this phone" appears. Create a job, change its status, delete another job. Reload the page: the app still loads, the changes are still there marked **Not synced yet**, and the Sync tab lists the waiting changes in order (the Developer view shows their op IDs).
-3. **Failed sync keeps the head op.** In B (online), Developer view → **Fail next sync**. In A, go back online: the sync fails with a 503, the Sync tab shows the error, and the Developer view shows the same op at the head with the same op ID and everything behind it still queued. Tap **Sync now**: all ops are applied.
+2. **Offline create, edit, delete, reload.** In A, open Developer view → **Fail next sync** (used in step 3), then go offline. The banner "Offline — changes saved on this phone" appears. Create a job, change its status, delete another job. Reload the page: the app still loads, the changes are still there marked **Not synced yet**, and the Sync tab lists the waiting changes in order (the Developer view shows their op IDs).
+3. **Failed sync keeps the head op.** In A, go back online: the sync fails with a 503, the Sync tab shows the error, and the Developer view shows the same op at the head with the same op ID and everything behind it still queued. Tap **Sync now**: all ops are applied.
 4. **Lost acknowledgment.** In A, Developer view → **Drop next ack**, then add a car. The server commits it but answers 503, so A still shows it as **Not synced yet**. Tap **Sync now**: the retry comes back as `duplicate` (visible in the server log) and there is exactly one car, on A, on B after it syncs, and in `GET /api/records`.
 5. **Two phones edit the same job.** Pick a seeded job that is `waiting`. Put both A and B offline. In A set its status to **paid**. In B change its price. Bring A online, then B. Both edits survive on both phones, and the Conflicts tab lists the contested field with kept and rejected values and both devices, highlighted because price is a money field. To see a rejection, repeat with both phones changing the price: the later edit is kept and the earlier one is listed as rejected.
 6. **Delete beats edit.** Both offline. In A delete a job. In B edit the same job. Bring A online, then B. The job stays deleted on both phones, and the Conflicts tab shows the rejected edit as "Edited after it was deleted".
 7. **Restart the backend.** Restart or redeploy the server (locally: stop and `npm start` again). Reload either profile: all data is still there, because records and processed op IDs live in PostgreSQL, not on the container's disk.
+8. **Roles.** Log out of B (tap the name at the top) and log in as **Amani** (attendant). Amani can add cars and mark them washing or done, but there is no **Take payment** button, the price and attendant are locked, and there is no delete. Amani's new jobs are always in Amani's name. If a change is refused by the server anyway (for example, it was queued before a role change), it leaves the queue and is listed in Conflicts as **Change refused** with the reason. In A (Manager), tap the name at the top → **Activity log** shows each change, login and refusal with who did it.
 
 ## 9. Test evidence
 
-Full output: [`docs/test-results.txt`](docs/test-results.txt), regenerated with `npm run test:report`. 46 tests: 9 shared, 11 client (Dexie on fake-indexeddb), 26 server (Supertest against a real PostgreSQL, schema reset per test file).
+Full output: [`docs/test-results.txt`](docs/test-results.txt), regenerated with `npm run test:report`. 76 tests: 15 shared, 15 client (Dexie on fake-indexeddb), 46 server (Supertest against a real PostgreSQL, schema reset per test file).
 
 | Requirement | Test |
 |---|---|
@@ -221,6 +233,11 @@ Full output: [`docs/test-results.txt`](docs/test-results.txt), regenerated with 
 | Acked op skipped and removed | `client/tests/sync.test.ts` |
 | Pull does not overwrite pending records | `client/tests/sync.test.ts` |
 | Data survives closing and reopening the DB | `client/tests/queue.test.ts` |
+| Role rules (shared), checked on the phone before queueing | `shared/src/auth.test.ts`, `client/tests/roles.test.ts` |
+| Refused op leaves the queue; refused create removed locally | `client/tests/roles.test.ts` |
+| Login, hashed PINs and sessions, logout, expiry, device binding | `server/tests/security.test.ts` |
+| Server enforces roles on every op; refusals logged; manager-only endpoints | `server/tests/security.test.ts` |
+| Rate limits, login lockout, security headers, audit log | `server/tests/security.test.ts` |
 | LWW, deterministic tie-break, per-field result | `shared/src/conflict.test.ts` |
 | Create, duplicate, lost ack, fail-next, invalid op | `server/tests/sync.test.ts` |
 | Two-device conflict, tombstone wins, conflict log | `server/tests/conflict.test.ts` |
@@ -240,17 +257,33 @@ The demo script in section 8 was also run in a browser against the production bu
 ## 10. Security and privacy
 
 - **Synthetic data only.** Seed plates, attendant names and M-Pesa codes are generated; no real people or vehicles.
-- **Token-protected API.** All `/api/*` routes need the bearer token; comparison is constant-time. `/healthz` is the only open route and exposes no data.
+- **Login: name + PIN, per person.** PINs are 4 to 8 digits, stored only as scrypt hashes with a random salt. A login returns a random 256-bit session token; the server stores only its SHA-256, bound to the phone's device ID, valid 30 days (long on purpose: phones work offline for days). Unknown names and wrong PINs get the same answer and take the same time. Logout, a PIN change, a role change or switching an account off ends its sessions at once. The session is kept in IndexedDB so the app opens offline; when it ends, the unsynced queue stays on the phone and is sent after the next login.
+- **Roles (RBAC), enforced on the server for every op.** One shared rule set (`shared/src/auth.ts`) is used by the server to decide and by the phone to hide controls and avoid queueing changes that would be refused.
+
+  | | Attendant | Cashier | Manager |
+  |---|---|---|---|
+  | Add jobs and supplies, move a job to washing / done, edit plate, vehicle, service, water, stock | ✓ | ✓ | ✓ |
+  | Take payment (status `paid`, method, M-Pesa code), reopen a paid job | | ✓ | ✓ |
+  | Change a price or the attendant on an existing job | | ✓ | ✓ |
+  | Delete jobs and supplies | | | ✓ |
+  | Manage users, view the activity log, demo toggles | | | ✓ |
+
+  An attendant's new job is always recorded in their own name. A session can only send ops for the device it logged in on.
+- **Audit log.** Every op (applied, resolved or refused), login, failed login, logout and user change is written with who, role, device and outcome; sync ops are logged in the same transaction as the change. PINs are never logged. Managers see it under Activity.
+- **Rate limits.** 600 API requests per minute per IP; 10 login attempts per minute per IP; 5 wrong PINs for one name lock that name for 15 minutes. Over the limit: `429` with `Retry-After`. Limits are in memory (one instance).
+- **Security headers** on every response: Content-Security-Policy (`default-src 'self'`, no inline scripts, `frame-ancestors 'none'`), `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer`, `Cross-Origin-Opener-Policy`, `Permissions-Policy`, and HSTS in production. API responses are `Cache-Control: no-store`.
+- **Operator token.** `SYNC_TOKEN` still works as a bearer token with manager rights for scripts and `curl`; it is compared in constant time and is no longer served to browsers. `/healthz` and the login endpoints are the only open routes.
 - **Input validation.** Every op is checked with strict zod schemas (unknown fields rejected, enums, ranges, lengths) before anything is written. Body limit 100 kb. All SQL is parameterised.
 - **No secrets in the repository.** `.env` is git-ignored; `.env.example` holds placeholders. The credentials in `docker-compose.yml` are for throwaway local databases.
-- **Demo toggles off by default in production.** They exist only when `DEMO_MODE=true` and still require the token.
+- **Demo mode is explicit.** With `DEMO_MODE=true` the server creates four synthetic logins (Amani and Baraka, attendants; Chiku, cashier; Manager) with PIN `2468`, lists them on the login screen, and enables the failure toggles for managers. Never turn it on for real use; set `ADMIN_NAME` / `ADMIN_PIN` instead.
 - **Container** runs as the non-root `node` user and stores nothing on local disk.
 
 ## 11. Known limitations
 
 - **Client clocks decide conflicts.** Last-writer-wins uses each phone's clock. A phone with a wrong clock can win or lose unfairly. The conflict log makes this visible but does not prevent it.
-- **One shared token, no per-user auth.** The app hands the token to every browser that loads it (`/app-config.json`), so anyone with the URL can read it. It keeps casual traffic off the API; it is not user authentication. `deviceId` and attendant name are self-declared.
-- **A rejected op blocks the queue.** By design the loop never skips the head. The client validates with the same schema as the server so a `400` should not occur, but if it did, later ops would wait behind it.
+- **PINs are short.** A 4-digit PIN is weak against an attacker who can try many; the per-name lockout and per-IP limit slow this down but are in memory and per instance. Use longer PINs for managers.
+- **A stolen phone stays logged in** until its session expires or a manager changes that person's PIN or switches them off.
+- **An invalid op blocks the queue.** By design the loop never skips the head. The client validates with the same schema as the server so a `400` should not occur, but if it did, later ops would wait behind it. (Ops refused for role reasons do not block: they are answered and leave the queue.)
 - **No pruning.** `ackedOps` on the phone and `processed_ops` and `conflict_log` on the server grow without bound. The phone keeps a copy of the latest 200 conflict entries.
 - **Pull is not paginated** and list screens filter in memory; fine for one car wash, not for thousands of records.
 - **Writes are serialised** on the server with one advisory lock so pulls never miss a change; this limits write throughput.
