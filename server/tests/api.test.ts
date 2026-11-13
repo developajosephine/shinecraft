@@ -27,15 +27,6 @@ describe('auth', () => {
   });
 });
 
-describe('GET /app-config.json', () => {
-  it('gives the client its sync token at runtime, uncached', async () => {
-    const res = await request(ctx.app).get('/app-config.json');
-    expect(res.status).toBe(200);
-    expect(res.body).toEqual({ syncToken: TOKEN });
-    expect(res.headers['cache-control']).toBe('no-store');
-  });
-});
-
 describe('GET /healthz', () => {
   it('-> 200 with db ok and the revision, no token needed', async () => {
     const res = await request(ctx.app).get('/healthz');

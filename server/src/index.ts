@@ -1,4 +1,5 @@
 import { createApp } from './app';
+import { ensureDemoUsers, ensureUser } from './auth';
 import { loadConfig } from './config';
 import { createPool, explainDbError, migrate } from './db';
 import { seedDemoData } from './seedData';
@@ -16,6 +17,14 @@ async function main() {
 
   if (config.seedOnStart) {
     console.log(JSON.stringify({ event: 'seeded', result: await seedDemoData(pool) }));
+  }
+
+  // Accounts: synthetic demo users in demo mode, and/or a first manager from the environment.
+  if (config.demoMode) console.log(JSON.stringify({ event: 'demo_users', created: await ensureDemoUsers(pool) }));
+  if (config.adminName && config.adminPin) {
+    if (!/^\d{4,8}$/.test(config.adminPin)) throw new Error('ADMIN_PIN must be 4 to 8 digits');
+    const created = await ensureUser(pool, config.adminName, 'manager', config.adminPin);
+    console.log(JSON.stringify({ event: 'admin_user', name: config.adminName, created }));
   }
 
   const app = createApp({ pool, ...config });

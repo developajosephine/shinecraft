@@ -63,7 +63,7 @@ export interface Op {
   clientTimestamp: string;
 }
 
-export type ConflictPolicy = 'lww' | 'lww-flag-money' | 'tombstone';
+export type ConflictPolicy = 'lww' | 'lww-flag-money' | 'tombstone' | 'forbidden';
 
 export interface FieldConflict {
   field: string;
@@ -87,6 +87,8 @@ export interface SyncResponse {
   status: SyncStatus;
   record: WashRecord | null; // current server record (null only if it never existed)
   conflict: ConflictInfo | null;
+  /** Why the op was rejected, when it was refused by the role rules. */
+  reasons?: string[];
 }
 
 export interface ChangesResponse {
