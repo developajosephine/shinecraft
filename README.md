@@ -198,14 +198,14 @@ One deliberate choice: the comparison is made per field rather than once per rec
 
 ## 8. Demo script
 
-Use the live URL, or locally `npm run build && npm start` at http://localhost:8080 after `npm run seed`. Open the app in **two browser profiles** (A and B) and give each a device name. "Offline" means DevTools → Network → Offline. The Debug tab shows the queue and the demo buttons.
+Use the live URL, or locally `npm run build && npm start` at http://localhost:8080 after `npm run seed`. Open the app in **two browser profiles** (A and B) and give each a device name. "Offline" means DevTools → Network → Offline. The **Developer view** (Sync tab → Developer view) shows the queue with op IDs and the demo buttons.
 
-1. **Online create.** In A, tap **Add car**, enter a plate, save. The job shows the `synced` badge.
-2. **Offline create, edit, delete, reload.** In A, go offline. The banner "Offline — changes saved on this phone" appears. Create a job, change its status, delete another job. Reload the page: the app still loads, the changes are still there with the `pending` badge, and Debug lists the queued ops in order.
-3. **Failed sync keeps the head op.** In B (online), Debug → **Fail next sync**. In A, go back online: the sync fails with a 503, the Sync tab shows the error, and Debug shows the same op at the head with the same op ID and everything behind it still queued. Tap **Sync now**: all ops are applied.
-4. **Lost acknowledgment.** In A, Debug → **Drop next ack**, then add a car. The server commits it but answers 503, so A still shows it as `pending`. Tap **Sync now**: the retry comes back as `duplicate` (visible in the server log) and there is exactly one car, on A, on B after it syncs, and in `GET /api/records`.
+1. **Online create.** In A, tap **Add car**, enter a plate, save. The job shows **Synced**.
+2. **Offline create, edit, delete, reload.** In A, go offline. The banner "Offline — changes saved on this phone" appears. Create a job, change its status, delete another job. Reload the page: the app still loads, the changes are still there marked **Not synced yet**, and the Sync tab lists the waiting changes in order (the Developer view shows their op IDs).
+3. **Failed sync keeps the head op.** In B (online), Developer view → **Fail next sync**. In A, go back online: the sync fails with a 503, the Sync tab shows the error, and the Developer view shows the same op at the head with the same op ID and everything behind it still queued. Tap **Sync now**: all ops are applied.
+4. **Lost acknowledgment.** In A, Developer view → **Drop next ack**, then add a car. The server commits it but answers 503, so A still shows it as **Not synced yet**. Tap **Sync now**: the retry comes back as `duplicate` (visible in the server log) and there is exactly one car, on A, on B after it syncs, and in `GET /api/records`.
 5. **Two phones edit the same job.** Pick a seeded job that is `waiting`. Put both A and B offline. In A set its status to **paid**. In B change its price. Bring A online, then B. Both edits survive on both phones, and the Conflicts tab lists the contested field with kept and rejected values and both devices, highlighted because price is a money field. To see a rejection, repeat with both phones changing the price: the later edit is kept and the earlier one is listed as rejected.
-6. **Delete beats edit.** Both offline. In A delete a job. In B edit the same job. Bring A online, then B. The job stays deleted on both phones, and the Conflicts tab shows the rejected edit as "edit after delete".
+6. **Delete beats edit.** Both offline. In A delete a job. In B edit the same job. Bring A online, then B. The job stays deleted on both phones, and the Conflicts tab shows the rejected edit as "Edited after it was deleted".
 7. **Restart the backend.** Restart or redeploy the server (locally: stop and `npm start` again). Reload either profile: all data is still there, because records and processed op IDs live in PostgreSQL, not on the container's disk.
 
 ## 9. Test evidence

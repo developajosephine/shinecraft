@@ -1,12 +1,12 @@
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db, type LocalConflict } from '../db';
 import { formatTime, shortId } from '../hooks';
-
-const show = (value: unknown) => (typeof value === 'string' ? value : JSON.stringify(value));
+import { FIELD_LABEL, formatValue } from '../labels';
+import { Empty, Icon } from '../ui';
 
 export function Conflicts({ deviceId, onRefresh }: { deviceId: string; onRefresh: () => void }) {
-  const conflicts = useLiveQuery(() => db.conflicts.orderBy('id').reverse().toArray(), [], [] as LocalConflict[]);
-  const labels = useLiveQuery(
+  const conflicts = useLiveQuery(() => db.conflicts.toArray(), [], [] as LocalConflict[]);
+  const names = useLiveQuery(
     async () => {
       const map = new Map<string, string>();
       for (const r of await db.records.toArray()) map.set(r.id, r.type === 'job' ? r.plate : r.item);
@@ -15,48 +15,59 @@ export function Conflicts({ deviceId, onRefresh }: { deviceId: string; onRefresh
     [],
     new Map<string, string>(),
   );
-  const device = (id: string) => (id === deviceId ? 'this phone' : shortId(id));
+  const device = (id: string) => (id === deviceId ? 'this phone' : id === 'seed-script' ? 'demo data' : `phone ${shortId(id)}`);
   const sorted = [...conflicts].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 
   return (
     <section>
-      <div className="row between">
+      <div className="row between section-head">
         <h2>Conflicts</h2>
-        <button className="link" onClick={onRefresh}>
-          Refresh
+        <button className="btn small" onClick={onRefresh}>
+          <Icon name="sync" size={16} /> Refresh
         </button>
       </div>
       <p className="muted">
-        When two phones change the same record, the later change wins. Nothing is hidden: every rejected value is listed
-        here. Money fields are highlighted.
+        When two phones change the same thing, the later change is kept. Nothing is hidden: every value that was not kept is
+        listed here. Money is highlighted so someone checks it.
       </p>
-      {sorted.length === 0 && <p className="muted">No conflicts recorded.</p>}
-      <ul className="list">
-        {sorted.map((c) => (
-          <li key={c.id} className={`card conflict-card ${c.policy === 'lww-flag-money' ? 'money' : ''}`}>
-            <div className="row between">
-              <span className="plate">
-                {labels.get(c.recordId) ?? shortId(c.recordId)} · {c.policy === 'tombstone' ? 'edit after delete' : c.field}
-              </span>
-              {c.policy === 'lww-flag-money' && <span className="badge conflict">money</span>}
-              {c.policy === 'tombstone' && <span className="badge conflict">deleted wins</span>}
-            </div>
-            <div className="versus">
-              <div>
-                <span className="muted">Kept ({device(c.winningDevice)})</span>
-                <b>{show(c.winningValue)}</b>
-              </div>
-              <div>
-                <span className="muted">Rejected ({device(c.rejectedDevice)})</span>
-                <s>{show(c.rejectedValue)}</s>
-              </div>
-            </div>
-            <div className="muted small">
-              {c.recordType} · {formatTime(c.createdAt)}
-            </div>
-          </li>
-        ))}
-      </ul>
+
+      {sorted.length === 0 ? (
+        <Empty icon="check" title="No conflicts">
+          Phones have not disagreed about any record.
+        </Empty>
+      ) : (
+        <ul className="list">
+          {sorted.map((c) => {
+            const money = c.policy === 'lww-flag-money';
+            const tombstone = c.policy === 'tombstone';
+            return (
+              <li key={c.id} className={`conflict-card ${money ? 'money' : ''}`}>
+                <div className="conflict-head">
+                  <div>
+                    <span className="plate">{names.get(c.recordId) ?? `Record ${shortId(c.recordId)}`}</span>
+                    <span className="conflict-field">{tombstone ? 'Edited after it was deleted' : (FIELD_LABEL[c.field] ?? c.field)}</span>
+                  </div>
+                  {money && <span className="chip st-money">Check money</span>}
+                  {tombstone && <span className="chip st-waiting">Stays deleted</span>}
+                </div>
+                <div className="versus">
+                  <div className="kept">
+                    <span className="versus-label">
+                      <Icon name="check" size={14} /> Kept · {device(c.winningDevice)}
+                    </span>
+                    <b>{tombstone ? 'Deleted' : formatValue(c.field, c.winningValue)}</b>
+                  </div>
+                  <div className="rejected">
+                    <span className="versus-label">Not kept · {device(c.rejectedDevice)}</span>
+                    <s>{formatValue(c.field, c.rejectedValue)}</s>
+                  </div>
+                </div>
+                <div className="muted small">{formatTime(c.createdAt)}</div>
+              </li>
+            );
+          })}
+        </ul>
+      )}
     </section>
   );
 }
