@@ -17,6 +17,7 @@ interface Props {
 type Payment = '' | 'cash' | 'mpesa';
 
 export function JobForm({ id, deviceName, onChanged }: Props) {
+  const role = useRole(); // before any early return: hooks must run in the same order every render
   const existing = useLiveQuery(
     async () => (id ? (((await db.records.get(id)) as JobRecord | undefined) ?? null) : null),
     [id],
@@ -141,7 +142,6 @@ export function JobForm({ id, deviceName, onChanged }: Props) {
     go('jobs');
   };
 
-  const role = useRole();
   const canPay = can(role, 'takePayment');
   const canPrice = !existing || can(role, 'changePrice');
   const canReassign = can(role, 'reassignJob');
